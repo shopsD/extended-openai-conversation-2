@@ -54,10 +54,10 @@ from .const import (
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
     CONF_SERVICE_TIER,
+    CONF_SERVICE_TYPE,
     CONF_SHORTEN_TOOL_CALL_ID,
     CONF_SKILLS,
     CONF_SKIP_AUTHENTICATION,
-    CONF_SERVICE_TYPE,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     CONTEXT_TRUNCATE_STRATEGIES,
@@ -90,7 +90,7 @@ from .const import (
     SERVICE_TYPES,
 )
 from .helpers import get_authenticated_client, get_model_config, get_service_type
-from .mcp_client import MCPConfigError, MCPServerConfig, generate_server_id
+from .mcp_client import MCPConfigError, MCPServerConfig, MCPUtils
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -322,7 +322,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             if get_service_type(entry) == SERVICE_TYPE_MCP
             and CONF_MCP_SERVER_ID in entry.data
         }
-        return generate_server_id(existing_ids)
+        return MCPUtils.generate_server_id(existing_ids)
 
     @classmethod
     @callback

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from openai import AsyncClient
 from openai._exceptions import AuthenticationError, OpenAIError
@@ -26,7 +27,7 @@ from .const import (
     SERVICE_TYPE_MCP,
 )
 from .helpers import get_authenticated_client, get_service_type
-from .mcp_client import MCPServerConfig
+from .mcp_client import MCPClient, MCPServerConfig
 from .services import async_setup_services
 from .template import async_setup_templates, async_unload_templates
 
@@ -35,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.AI_TASK, Platform.CONVERSATION]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-type ExtendedOpenAIConfigEntry = ConfigEntry[AsyncClient | MCPServerConfig]
+type ExtendedOpenAIConfigEntry = ConfigEntry[AsyncClient | MCPClient]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -51,12 +52,10 @@ async def async_setup_entry(
     """Set up OpenAI Conversation from a config entry."""
 
     if get_service_type(entry) == SERVICE_TYPE_MCP:
-        entry.runtime_data = MCPServerConfig.from_dict(
-            {
-                **entry.data,
-                "name": entry.title,
-            }
+        config = MCPServerConfig.from_dict(
+            {**entry.data, "name": entry.title}
         )
+        entry.runtime_data = MCPClient(config)
         entry.async_on_unload(entry.add_update_listener(update_listener))
         return True
 
@@ -87,9 +86,12 @@ async def async_setup_entry(
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(
+    hass: HomeAssistant, entry: ExtendedOpenAIConfigEntry
+) -> bool:
     """Unload OpenAI."""
     if get_service_type(entry) == SERVICE_TYPE_MCP:
+        await cast(MCPClient, entry.runtime_data).aclose()
         return True
     await async_unload_templates(hass)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

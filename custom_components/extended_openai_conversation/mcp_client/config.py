@@ -1,25 +1,36 @@
-"""MCP server configuration independent of Home Assistant."""
+"""MCP server configuration for the integration."""
 
 from __future__ import annotations
 
-import re
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+import re
 from typing import Any
 from urllib.parse import urlparse
+
+from .mcp_errors import MCPConfigError
 
 _SERVER_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _HEADER_NAME_PATTERN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 
 
-class MCPConfigError(ValueError):
-    """An invalid MCP server configuration value."""
+def _validate_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    """Return a validated copy of HTTP headers."""
+    if not isinstance(headers, Mapping):
+        raise MCPConfigError("headers", "invalid_headers")
 
-    def __init__(self, field: str, code: str) -> None:
-        super().__init__(code)
-        self.field = field
-        self.code = code
-
+    validated: dict[str, str] = {}
+    for name, value in headers.items():
+        if (
+            not isinstance(name, str)
+            or not _HEADER_NAME_PATTERN.fullmatch(name)
+            or not isinstance(value, str)
+            or "\r" in value
+            or "\n" in value
+        ):
+            raise MCPConfigError("headers", "invalid_headers")
+        validated[name] = value
+    return validated
 
 @dataclass(frozen=True, slots=True)
 class MCPServerConfig:
@@ -75,32 +86,3 @@ class MCPServerConfig:
             "description": self.description,
             "headers": dict(self.headers),
         }
-
-
-def generate_server_id(existing_ids: Collection[str], base_id: str = "mcp_server") -> str:
-    """Generate a readable server ID that does not collide with existing IDs."""
-    candidate = base_id
-    suffix = 2
-    while candidate in existing_ids:
-        candidate = f"{base_id}_{suffix}"
-        suffix += 1
-    return candidate
-
-
-def _validate_headers(headers: Mapping[str, str]) -> dict[str, str]:
-    """Return a validated copy of HTTP headers."""
-    if not isinstance(headers, Mapping):
-        raise MCPConfigError("headers", "invalid_headers")
-
-    validated: dict[str, str] = {}
-    for name, value in headers.items():
-        if (
-            not isinstance(name, str)
-            or not _HEADER_NAME_PATTERN.fullmatch(name)
-            or not isinstance(value, str)
-            or "\r" in value
-            or "\n" in value
-        ):
-            raise MCPConfigError("headers", "invalid_headers")
-        validated[name] = value
-    return validated

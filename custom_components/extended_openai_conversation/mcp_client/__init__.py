@@ -1,9 +1,25 @@
 """Public API for the extractable MCP client library."""
 
-from .config import MCPConfigError, MCPServerConfig, generate_server_id
+from .config import MCPServerConfig
+from .mcp_client import MCPClient
+from .mcp_datatypes import MCPServerInformation, MCPTool, MCPToolResult
+from .mcp_errors import (
+    MCPClientClosedError,
+    MCPClientError,
+    MCPConfigError,
+    MCPProtocolError,
+)
+from .mcp_utils import MCPUtils
 
 __all__ = [
+    "MCPClient",
+    "MCPClientClosedError",
+    "MCPClientError",
     "MCPConfigError",
+    "MCPProtocolError",
     "MCPServerConfig",
-    "generate_server_id",
+    "MCPServerInformation",
+    "MCPTool",
+    "MCPToolResult",
+    "MCPUtils",
 ]

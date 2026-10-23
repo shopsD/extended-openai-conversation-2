@@ -21,8 +21,8 @@ from homeassistant.helpers.template import Template
 from .const import (
     ALTERNATE_REQUEST_PARAMS,
     CONF_SERVICE_TYPE,
-    DEFAULT_SERVICE_TYPE,
     DEFAULT_MODEL_CONFIG,
+    DEFAULT_SERVICE_TYPE,
     MODEL_CONFIG_PATTERNS,
     OPENAI_API_HOST,
     OPENAI_DEFAULT_MODEL_CONFIG,

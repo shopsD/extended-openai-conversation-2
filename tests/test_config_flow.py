@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.extended_openai_conversation.config_flow import (
-    ExtendedOpenAISubentryFlowHandler,
     ExtendedOpenAIConversationConfigFlow,
+    ExtendedOpenAISubentryFlowHandler,
     validate_input,
 )
 from custom_components.extended_openai_conversation.const import (
