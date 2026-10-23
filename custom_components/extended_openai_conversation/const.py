@@ -18,6 +18,21 @@ API_PROVIDERS = [
 ]
 DEFAULT_API_PROVIDER = API_PROVIDERS[0]["key"]
 
+CONF_SERVICE_TYPE = "type"
+SERVICE_TYPE_AI_ENDPOINT = "ai_endpoint"
+SERVICE_TYPE_MCP = "mcp"
+
+SERVICE_TYPES = [
+    {"key": SERVICE_TYPE_AI_ENDPOINT, "label": "AI endpoint"},
+    {"key": SERVICE_TYPE_MCP, "label": "MCP"},
+]
+DEFAULT_SERVICE_TYPE = SERVICE_TYPE_AI_ENDPOINT
+
+CONF_MCP_SERVER_ID = "server_id"
+CONF_MCP_SERVER_URL = "url"
+CONF_MCP_DESCRIPTION = "description"
+CONF_MCP_HEADERS = "headers"
+
 EVENT_AUTOMATION_REGISTERED = "automation_registered_via_extended_openai_conversation"
 EVENT_CONVERSATION_FINISHED = "extended_openai_conversation.conversation.finished"
 

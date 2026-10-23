@@ -25,6 +25,7 @@ from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
+    ObjectSelector,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -45,6 +46,10 @@ from .const import (
     CONF_FUNCTION_TOOLS,
     CONF_MAX_FUNCTION_CALLS_PER_CONVERSATION,
     CONF_MAX_TOKENS,
+    CONF_MCP_DESCRIPTION,
+    CONF_MCP_HEADERS,
+    CONF_MCP_SERVER_ID,
+    CONF_MCP_SERVER_URL,
     CONF_ORGANIZATION,
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
@@ -52,6 +57,7 @@ from .const import (
     CONF_SHORTEN_TOOL_CALL_ID,
     CONF_SKILLS,
     CONF_SKIP_AUTHENTICATION,
+    CONF_SERVICE_TYPE,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     CONTEXT_TRUNCATE_STRATEGIES,
@@ -79,13 +85,31 @@ from .const import (
     DOMAIN,
     REASONING_EFFORT_OPTIONS,
     SERVICE_TIER_OPTIONS,
+    SERVICE_TYPE_AI_ENDPOINT,
+    SERVICE_TYPE_MCP,
+    SERVICE_TYPES,
 )
-from .helpers import get_authenticated_client, get_model_config
+from .helpers import get_authenticated_client, get_model_config, get_service_type
+from .mcp_client import MCPConfigError, MCPServerConfig, generate_server_id
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_SERVICE_TYPE): SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    SelectOptionDict(value=item["key"], label=item["label"])
+                    for item in SERVICE_TYPES
+                ],
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        )
+    }
+)
+
+STEP_AI_ENDPOINT_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_NAME, default="ChatGPT"): str,
         vol.Required(CONF_API_KEY): str,
@@ -169,46 +193,136 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial step."""
+        """Choose the type of service to configure."""
         if user_input is None:
             return self.async_show_form(
                 step_id="user", data_schema=STEP_USER_DATA_SCHEMA
             )
 
+        if user_input[CONF_SERVICE_TYPE] == SERVICE_TYPE_MCP:
+            return await self.async_step_mcp()
+
+        return await self.async_step_ai_endpoint()
+
+    async def async_step_ai_endpoint(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure an AI endpoint service."""
+
         errors = {}
 
-        try:
-            await validate_input(self.hass, user_input)
-        except APIConnectionError:
-            errors["base"] = "cannot_connect"
-        except AuthenticationError:
-            errors["base"] = "invalid_auth"
-        except Exception:  # pylint: disable=broad-except
-            _LOGGER.exception("Unexpected exception")
-            errors["base"] = "unknown"
-        else:
-            return self.async_create_entry(
-                title=user_input.get(CONF_NAME, DEFAULT_NAME),
-                data=user_input,
-                subentries=[
-                    {
-                        "subentry_type": "conversation",
-                        "data": dict(DEFAULT_OPTIONS),
-                        "title": DEFAULT_CONVERSATION_NAME,
-                        "unique_id": None,
-                    },
-                    {
-                        "subentry_type": "ai_task_data",
-                        "data": dict(DEFAULT_AI_TASK_OPTIONS),
-                        "title": DEFAULT_AI_TASK_NAME,
-                        "unique_id": None,
-                    },
-                ],
-            )
+        if user_input is not None:
+            try:
+                await validate_input(self.hass, user_input)
+            except APIConnectionError:
+                errors["base"] = "cannot_connect"
+            except AuthenticationError:
+                errors["base"] = "invalid_auth"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
+            else:
+                user_input[CONF_SERVICE_TYPE] = SERVICE_TYPE_AI_ENDPOINT
+                return self.async_create_entry(
+                    title=user_input.get(CONF_NAME, DEFAULT_NAME),
+                    data=user_input,
+                    subentries=[
+                        {
+                            "subentry_type": "conversation",
+                            "data": dict(DEFAULT_OPTIONS),
+                            "title": DEFAULT_CONVERSATION_NAME,
+                            "unique_id": None,
+                        },
+                        {
+                            "subentry_type": "ai_task_data",
+                            "data": dict(DEFAULT_AI_TASK_OPTIONS),
+                            "title": DEFAULT_AI_TASK_NAME,
+                            "unique_id": None,
+                        },
+                    ],
+                )
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="ai_endpoint",
+            data_schema=STEP_AI_ENDPOINT_DATA_SCHEMA,
+            errors=errors,
         )
+
+    async def async_step_mcp(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure an MCP service."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                config = MCPServerConfig(
+                    server_id=user_input[CONF_MCP_SERVER_ID],
+                    name=user_input[CONF_NAME],
+                    url=user_input[CONF_MCP_SERVER_URL],
+                    description=user_input.get(CONF_MCP_DESCRIPTION, ""),
+                    headers=user_input.get(CONF_MCP_HEADERS, {}),
+                )
+            except MCPConfigError as err:
+                error_field = {
+                    "server_id": CONF_MCP_SERVER_ID,
+                    "name": CONF_NAME,
+                    "url": CONF_MCP_SERVER_URL,
+                    "headers": CONF_MCP_HEADERS,
+                }[err.field]
+                errors[error_field] = err.code
+            else:
+                if self._mcp_server_id_exists(config.server_id):
+                    errors[CONF_MCP_SERVER_ID] = "duplicate_server_id"
+                else:
+                    config_data = config.to_dict()
+                    title = config_data.pop("name")
+                    return self.async_create_entry(
+                        title=title,
+                        data={
+                            CONF_SERVICE_TYPE: SERVICE_TYPE_MCP,
+                            **config_data,
+                        },
+                    )
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_NAME, default="MCP Server"): str,
+                vol.Required(
+                    CONF_MCP_SERVER_ID,
+                    default=self._generate_mcp_server_id(),
+                ): str,
+                vol.Optional(CONF_MCP_DESCRIPTION, default=""): str,
+                vol.Required(CONF_MCP_SERVER_URL): str,
+                vol.Optional(CONF_MCP_HEADERS, default={}): ObjectSelector(),
+            }
+        )
+        if user_input is not None:
+            schema = self.add_suggested_values_to_schema(schema, user_input)
+
+        return self.async_show_form(
+            step_id="mcp",
+            data_schema=schema,
+            errors=errors,
+        )
+
+    def _mcp_server_id_exists(self, server_id: str) -> bool:
+        """Return whether an MCP service already uses the server ID."""
+        return any(
+            get_service_type(entry) == SERVICE_TYPE_MCP
+            and entry.data.get(CONF_MCP_SERVER_ID) == server_id
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+        )
+
+    def _generate_mcp_server_id(self) -> str:
+        """Generate a short, readable, unique MCP server ID."""
+        existing_ids = {
+            entry.data[CONF_MCP_SERVER_ID]
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+            if get_service_type(entry) == SERVICE_TYPE_MCP
+            and CONF_MCP_SERVER_ID in entry.data
+        }
+        return generate_server_id(existing_ids)
 
     @classmethod
     @callback
@@ -216,6 +330,8 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         cls, config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
         """Return subentries supported by this integration."""
+        if get_service_type(config_entry) == SERVICE_TYPE_MCP:
+            return {}
         return {
             "conversation": ExtendedOpenAISubentryFlowHandler,
             "ai_task_data": ExtendedOpenAIAITaskSubentryFlowHandler,

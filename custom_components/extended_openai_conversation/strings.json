@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Choose service type",
+        "description": "Select the type of service to add.",
+        "data": {
+          "type": "Service type"
+        }
+      },
+      "ai_endpoint": {
+        "title": "Add AI endpoint",
         "data": {
           "name": "[%key:common::config_flow::data::name%]",
           "api_key": "[%key:common::config_flow::data::api_key%]",
@@ -11,11 +19,32 @@
           "skip_authentication": "[%key:common::config_flow::data::skip_authentication%]",
           "api_provider": "[%key:common::config_flow::data::api_provider%]"
         }
+      },
+      "mcp": {
+        "title": "Add MCP service",
+        "description": "Configure a shared MCP server connection. Conversation agents can reference this server by its ID.",
+        "data": {
+          "name": "[%key:common::config_flow::data::name%]",
+          "server_id": "Server ID",
+          "description": "Description",
+          "url": "Server URL",
+          "headers": "HTTP headers"
+        },
+        "data_description": {
+          "server_id": "A short, unique ID used by conversation-agent function configuration.",
+          "description": "Optional model-visible description of the server's purpose.",
+          "headers": "Optional HTTP headers, including static Authorization headers."
+        }
       }
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "duplicate_server_id": "Another MCP service already uses this server ID.",
+      "invalid_headers": "HTTP header names and values must be valid strings.",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "invalid_name": "Enter a name for the MCP service.",
+      "invalid_server_id": "Use lowercase letters, numbers, underscores, or hyphens; the ID must start with a letter or number.",
+      "invalid_url": "Enter a valid HTTP or HTTPS URL.",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     }
   },

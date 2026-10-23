@@ -12,6 +12,7 @@ from openai import AsyncAzureOpenAI, AsyncClient, AsyncOpenAI, BadRequestError
 
 from homeassistant.components import conversation
 from homeassistant.components.homeassistant.exposed_entities import async_should_expose
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.httpx_client import get_async_client
@@ -19,6 +20,8 @@ from homeassistant.helpers.template import Template
 
 from .const import (
     ALTERNATE_REQUEST_PARAMS,
+    CONF_SERVICE_TYPE,
+    DEFAULT_SERVICE_TYPE,
     DEFAULT_MODEL_CONFIG,
     MODEL_CONFIG_PATTERNS,
     OPENAI_API_HOST,
@@ -33,6 +36,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 AZURE_DOMAIN_PATTERN = r"\.(openai\.azure\.com|azure-api\.net|services\.ai\.azure\.com)"
+
+
+def get_service_type(entry: ConfigEntry) -> str:
+    """Return an entry's service type, defaulting legacy entries to AI."""
+    return entry.data.get(CONF_SERVICE_TYPE, DEFAULT_SERVICE_TYPE)
 
 
 def get_model_config(model: str, base_url: str | None = None) -> dict[str, bool]:

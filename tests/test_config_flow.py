@@ -10,12 +10,13 @@ follow-up (see issue #7) rather than attempted here with a mocked hass that
 doesn't behave like the real flow manager.
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.extended_openai_conversation.config_flow import (
     ExtendedOpenAISubentryFlowHandler,
+    ExtendedOpenAIConversationConfigFlow,
     validate_input,
 )
 from custom_components.extended_openai_conversation.const import (
@@ -23,9 +24,16 @@ from custom_components.extended_openai_conversation.const import (
     CONF_BASE_URL,
     CONF_CHAT_MODEL,
     CONF_FUNCTION_TOOLS,
+    CONF_MCP_DESCRIPTION,
+    CONF_MCP_HEADERS,
+    CONF_MCP_SERVER_ID,
+    CONF_MCP_SERVER_URL,
     CONF_PROMPT,
+    CONF_SERVICE_TYPE,
     CONF_SKILLS,
     DEFAULT_CONF_BASE_URL,
+    SERVICE_TYPE_AI_ENDPOINT,
+    SERVICE_TYPE_MCP,
 )
 from homeassistant.const import CONF_API_KEY
 from homeassistant.exceptions import HomeAssistantError
@@ -34,6 +42,120 @@ from homeassistant.exceptions import HomeAssistantError
 def _schema_keys(schema: dict) -> set[str]:
     """Extract the plain string keys from a dict of voluptuous Marker -> Selector."""
     return {getattr(key, "schema", key) for key in schema}
+
+
+def _config_flow(hass) -> ExtendedOpenAIConversationConfigFlow:
+    """Create a config flow with the lightweight test Home Assistant mock."""
+    flow = ExtendedOpenAIConversationConfigFlow()
+    flow.hass = hass
+    hass.config_entries.async_entries.return_value = []
+    return flow
+
+
+async def test_user_step_asks_for_service_type(hass):
+    """The initial Add Service step asks which service type to configure."""
+    flow = _config_flow(hass)
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+    await flow.async_step_user()
+
+    schema = flow.async_show_form.call_args.kwargs["data_schema"]
+    assert flow.async_show_form.call_args.kwargs["step_id"] == "user"
+    assert _schema_keys(schema.schema) == {CONF_SERVICE_TYPE}
+
+
+async def test_user_step_routes_to_ai_endpoint(hass):
+    """Selecting AI endpoint opens the existing AI endpoint form."""
+    flow = _config_flow(hass)
+    flow.async_step_ai_endpoint = AsyncMock(return_value={"step_id": "ai_endpoint"})
+
+    result = await flow.async_step_user(
+        {CONF_SERVICE_TYPE: SERVICE_TYPE_AI_ENDPOINT}
+    )
+
+    assert result == {"step_id": "ai_endpoint"}
+    flow.async_step_ai_endpoint.assert_awaited_once_with()
+
+
+async def test_user_step_routes_to_mcp(hass):
+    """Selecting MCP opens the MCP configuration form."""
+    flow = _config_flow(hass)
+    flow.async_step_mcp = AsyncMock(return_value={"step_id": "mcp"})
+
+    result = await flow.async_step_user({CONF_SERVICE_TYPE: SERVICE_TYPE_MCP})
+
+    assert result == {"step_id": "mcp"}
+    flow.async_step_mcp.assert_awaited_once_with()
+
+
+async def test_mcp_step_creates_typed_service(hass):
+    """A valid MCP form creates an MCP service without agent subentries."""
+    flow = _config_flow(hass)
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+    user_input = {
+        "name": "Vault MCP",
+        CONF_MCP_SERVER_ID: "vault",
+        CONF_MCP_SERVER_URL: "https://mcp.example.com/api",
+        CONF_MCP_DESCRIPTION: "Secure storage tools",
+        CONF_MCP_HEADERS: {"Authorization": "Bearer test-token"},
+    }
+
+    await flow.async_step_mcp(user_input)
+
+    call = flow.async_create_entry.call_args.kwargs
+    assert call["title"] == "Vault MCP"
+    assert call["data"][CONF_SERVICE_TYPE] == SERVICE_TYPE_MCP
+    assert call["data"][CONF_MCP_SERVER_ID] == "vault"
+    assert call["data"][CONF_MCP_DESCRIPTION] == "Secure storage tools"
+    assert "subentries" not in call
+
+
+async def test_mcp_step_rejects_duplicate_server_id(hass):
+    """MCP server IDs must be unique across centrally configured services."""
+    flow = _config_flow(hass)
+    existing_entry = MagicMock()
+    existing_entry.data = {
+        CONF_SERVICE_TYPE: SERVICE_TYPE_MCP,
+        CONF_MCP_SERVER_ID: "vault",
+    }
+    hass.config_entries.async_entries.return_value = [existing_entry]
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+    await flow.async_step_mcp(
+        {
+            "name": "Another Vault",
+            CONF_MCP_SERVER_ID: "vault",
+            CONF_MCP_SERVER_URL: "https://mcp.example.com/api",
+            CONF_MCP_HEADERS: {},
+        }
+    )
+
+    assert flow.async_show_form.call_args.kwargs["errors"] == {
+        CONF_MCP_SERVER_ID: "duplicate_server_id"
+    }
+
+
+def test_mcp_services_do_not_support_agent_subentries():
+    """MCP services are shared connections, not agent containers."""
+    entry = MagicMock()
+    entry.data = {CONF_SERVICE_TYPE: SERVICE_TYPE_MCP}
+
+    assert (
+        ExtendedOpenAIConversationConfigFlow.async_get_supported_subentry_types(entry)
+        == {}
+    )
+
+
+def test_legacy_services_still_support_agent_subentries():
+    """Entries without a type retain the legacy AI endpoint behavior."""
+    entry = MagicMock()
+    entry.data = {}
+
+    subentry_types = (
+        ExtendedOpenAIConversationConfigFlow.async_get_supported_subentry_types(entry)
+    )
+
+    assert set(subentry_types) == {"conversation", "ai_task_data"}
 
 
 async def test_validate_input_calls_get_authenticated_client(hass):
