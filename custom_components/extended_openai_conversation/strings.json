@@ -81,7 +81,8 @@
       },
       "mcp_review": {
         "title": "Review MCP context",
-        "description": "Permanent Tools: {permanent_exposure}\n\nSelected permanent tools: {selected_tool_count}\n\nSchemas included: {schemas_included}\n\nOn-demand discovery: {on_demand_discovery}\n\nRegular-expression timeout: {regex_timeout} seconds\n\nPermanent context size: {character_count} characters ({byte_count} bytes)\n\nEstimated context cost per request: approximately {estimated_tokens} tokens"
+        "description": "Permanent Tools: {permanent_exposure}\n\nSelected permanent tools: {selected_tool_count}\n\nSchemas included: {schemas_included}\n\nOn-demand discovery: {on_demand_discovery}\n\nRegular-expression timeout: {regex_timeout} seconds\n\nPermanent context size: {character_count} characters ({byte_count} bytes)\n\nEstimated context cost per request: approximately {estimated_tokens} tokens",
+        "submit": "Add MCP service"
       }
     },
     "error": {

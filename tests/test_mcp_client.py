@@ -5,13 +5,13 @@ import pytest
 from custom_components.extended_openai_conversation.mcp_client import (
     MCPClientConfigFlow,
     MCPConfigError,
+    MCPContextEstimate,
     MCPDiscoveryResult,
     MCPServerConfig,
     MCPServerInformation,
     MCPServiceConfig,
     MCPTool,
     MCPUtils,
-    estimate_permanent_context,
 )
 
 
@@ -210,10 +210,7 @@ def test_server_config_rejects_invalid_values(kwargs, field, code):
 
 def test_generate_server_id_uses_first_available_suffix():
     """Generated IDs remain readable and avoid existing service IDs."""
-    assert (
-        MCPUtils.generate_server_id({"mcp_server", "mcp_server_2"})
-        == "mcp_server_3"
-    )
+    assert MCPUtils.generate_server_id({"mcp_server", "mcp_server_2"}) == "mcp_server_3"
 
 
 def test_permanent_context_estimate_uses_the_rendered_schema_content():
@@ -238,10 +235,10 @@ def test_permanent_context_estimate_uses_the_rendered_schema_content():
         ),
     )
 
-    metadata_only = estimate_permanent_context(
+    metadata_only = MCPContextEstimate.estimate_permanent_context(
         config, tools, include_schemas=False
     )
-    with_schemas = estimate_permanent_context(
+    with_schemas = MCPContextEstimate.estimate_permanent_context(
         config, tools, include_schemas=True
     )
 

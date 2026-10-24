@@ -21,6 +21,7 @@ _REQUIRED_TEXT_FIELDS = {
     "url": "invalid_url",
 }
 
+@dataclass(slots=True)
 class MCPConfigFlowTempData:
     """Class used to store data only during the lifetime of the active Config Flow"""
     mcp_config: MCPServerConfig | None = None

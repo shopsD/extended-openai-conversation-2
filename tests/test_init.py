@@ -7,12 +7,14 @@ from custom_components.extended_openai_conversation import (
     async_unload_entry,
 )
 from custom_components.extended_openai_conversation.const import (
-    CONF_MCP_SERVER_ID,
-    CONF_MCP_SERVER_URL,
     CONF_SERVICE_TYPE,
     SERVICE_TYPE_MCP,
 )
-from custom_components.extended_openai_conversation.mcp_client import MCPClient
+from custom_components.extended_openai_conversation.mcp_client import (
+    CONF_MCP_SERVER_ID,
+    CONF_MCP_SERVER_URL,
+    MCPClient,
+)
 
 
 async def test_mcp_entry_does_not_create_openai_client(hass):

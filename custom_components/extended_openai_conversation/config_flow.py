@@ -205,7 +205,10 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenAI Conversation."""
 
     VERSION = 2
-    _mcp_config_tmp: MCPConfigFlowTempData = MCPConfigFlowTempData()
+    def __init__(self) -> None:
+        """Initialize the config flow."""
+        super().__init__()
+        self._mcp_config_tmp: MCPConfigFlowTempData = MCPConfigFlowTempData()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -516,49 +519,41 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Review MCP policy and estimated permanent context size."""
-        if self._mcp_config_tmp.mcp_config is None or self._mcp_config_tmp.mcp_options is None:
+        if self._mcp_config_tmp.mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
-        selected_names = set(self._mcp_config_tmp.mcp_options[CONF_MCP_PERMANENT_TOOLS])
-        selected_tools = (
-            tuple(
-                tool
-                for tool in (self._mcp_config_tmp.mcp_discovery.tools if self._mcp_config_tmp.mcp_discovery else ())
-                if tool.name in selected_names
+        service_config: MCPServiceConfig | None = self._mcp_config_tmp.mcp_service_config
+        if service_config is None:
+            return self.async_abort(reason="mcp_invalid_flow_state")
+
+        if user_input is not None:
+            return self.async_create_entry(
+                title=service_config.server.name,
+                data={**service_config.to_dict(), CONF_SERVICE_TYPE: SERVICE_TYPE_MCP},
             )
-            if self._mcp_config_tmp.mcp_options[CONF_MCP_PERMANENT_TOOL_EXPOSURE]
-            else ()
-        )
+
         estimate: MCPContextEstimate = MCPContextEstimate.estimate_permanent_context(
-            self._mcp_config_tmp.mcp_config,
-            selected_tools,
-            include_schemas=self._mcp_config_tmp.mcp_options[
-                CONF_MCP_INCLUDE_PERMANENT_SCHEMAS
-            ],
+            service_config.server,
+            service_config.permanent_tools,
+            include_schemas=service_config.include_permanent_schemas,
         )
 
         return self.async_show_form(
             step_id="mcp_review",
             data_schema=vol.Schema({}),
             description_placeholders={
-                "permanent_exposure": (
-                    "Yes"
-                    if self._mcp_config_tmp.mcp_options[CONF_MCP_PERMANENT_TOOL_EXPOSURE]
-                    else "No"
-                ),
+                "permanent_exposure": ( "Yes" if service_config.permanent_tool_exposure else "No"),
                 "selected_tool_count": str(estimate.selected_tool_count),
                 "schemas_included": (
                     "Yes"
-                    if self._mcp_config_tmp.mcp_options[CONF_MCP_INCLUDE_PERMANENT_SCHEMAS]
+                    if service_config.include_permanent_schemas
                     and estimate.selected_tool_count
                     else "No"
                 ),
                 "on_demand_discovery": (
-                    "Yes"
-                    if self._mcp_config_tmp.mcp_options[CONF_MCP_ON_DEMAND_DISCOVERY]
-                    else "No"
+                    "Yes" if service_config.on_demand_discovery else "No"
                 ),
-                "regex_timeout": str(self._mcp_config_tmp.mcp_options[CONF_MCP_REGEX_TIMEOUT]),
+                "regex_timeout": str(service_config.regex_timeout),
                 "character_count": f"{estimate.character_count:,}",
                 "byte_count": f"{estimate.byte_count:,}",
                 "estimated_tokens": f"{estimate.estimated_tokens:,}",
