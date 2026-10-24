@@ -6,6 +6,12 @@ import logging
 import types
 from typing import Any
 
+from mcp_client.mcp_const import (
+    CONF_MCP_DESCRIPTION,
+    CONF_MCP_HEADERS,
+    CONF_MCP_SERVER_ID,
+    CONF_MCP_SERVER_URL,
+)
 from openai._exceptions import APIConnectionError, AuthenticationError
 import probatio as vol
 import yaml
@@ -46,10 +52,6 @@ from .const import (
     CONF_FUNCTION_TOOLS,
     CONF_MAX_FUNCTION_CALLS_PER_CONVERSATION,
     CONF_MAX_TOKENS,
-    CONF_MCP_DESCRIPTION,
-    CONF_MCP_HEADERS,
-    CONF_MCP_SERVER_ID,
-    CONF_MCP_SERVER_URL,
     CONF_ORGANIZATION,
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
