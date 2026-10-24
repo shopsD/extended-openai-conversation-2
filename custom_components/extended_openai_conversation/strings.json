@@ -51,11 +51,33 @@
       },
       "mcp_tools": {
         "title": "Discovered MCP tools",
-        "description": "Connected to {server_name} and discovered {tool_count} tools."
+        "description": "Connected to {server_name} and discovered {tool_count} tools.",
+        "data": {
+          "permanent_tool_exposure": "Enable permanent tool exposure",
+          "permanent_tools": "Permanent tools",
+          "include_permanent_schemas": "Include permanent tool schemas",
+          "on_demand_discovery": "Enable on-demand discovery",
+          "regex_timeout": "Regular-expression timeout"
+        },
+        "data_description": {
+          "permanent_tool_exposure": "Include selected tool metadata in the initial model context.",
+          "permanent_tools": "Tools to expose in the initial model context. All tools are still executed through the MCP function.",
+          "include_permanent_schemas": "Include the input schemas of permanent tools in the initial model context.",
+          "on_demand_discovery": "Allow conversation agents to discover tools outside the permanent selection.",
+          "regex_timeout": "Maximum number of seconds allowed for each regular-expression match."
+        }
       },
       "mcp_options": {
         "title": "Configure MCP tool access",
-        "description": "Configure how this MCP service exposes tools to conversation agents."
+        "description": "Tool discovery was skipped. Permanent tools can be selected after discovering or refreshing the catalogue.",
+        "data": {
+          "on_demand_discovery": "Enable on-demand discovery",
+          "regex_timeout": "Regular-expression timeout"
+        },
+        "data_description": {
+          "on_demand_discovery": "Allow conversation agents to discover tools after a catalogue is available.",
+          "regex_timeout": "Maximum number of seconds allowed for each regular-expression match."
+        }
       }
     },
     "error": {

@@ -9,8 +9,17 @@ from typing import Any
 from mcp_client.mcp_const import (
     CONF_MCP_DESCRIPTION,
     CONF_MCP_HEADERS,
+    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    CONF_MCP_ON_DEMAND_DISCOVERY,
+    CONF_MCP_PERMANENT_TOOL_EXPOSURE,
+    CONF_MCP_PERMANENT_TOOLS,
+    CONF_MCP_REGEX_TIMEOUT,
     CONF_MCP_SERVER_ID,
     CONF_MCP_SERVER_URL,
+    DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    DEFAULT_MCP_ON_DEMAND_DISCOVERY,
+    DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
+    DEFAULT_MCP_REGEX_TIMEOUT,
 )
 from openai._exceptions import APIConnectionError, AuthenticationError
 import probatio as vol
@@ -310,21 +319,19 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_mcp_perform_discovery(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask the user whether to discover the server's tools."""
+        """Discover the server's tools after the user explicitly requests it."""
         if self._mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
         errors: dict[str, str] = {}
-
-        if user_input is not None:
-            processor: MCPClientConfigFlow = MCPClientConfigFlow(self._mcp_server_ids())
-            try:
-                self._mcp_discovery = await processor.discover(self._mcp_config)
-            except Exception:
-                _LOGGER.exception("Unexpected error during MCP tool discovery")
-                errors["base"] = "mcp_tool_discovery_failed"
-            else:
-                return await self.async_step_mcp_tools()
+        processor = MCPClientConfigFlow(self._mcp_server_ids())
+        try:
+            self._mcp_discovery = await processor.discover(self._mcp_config)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unexpected error during MCP tool discovery")
+            errors["base"] = "mcp_tool_discovery_failed"
+        else:
+            return await self.async_step_mcp_tools()
 
         return self.async_show_form(
             step_id="mcp_perform_discovery",
@@ -345,17 +352,76 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_mcp_tools(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Display the successfully discovered MCP catalogue."""
+        """Configure tool exposure from the discovered MCP catalogue."""
         if self._mcp_discovery is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
+        tool_options = [
+            SelectOptionDict(value=tool.name, label=tool.title or tool.name)
+            for tool in self._mcp_discovery.tools
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_MCP_PERMANENT_TOOL_EXPOSURE,
+                    default=DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
+                ): BooleanSelector(),
+                vol.Optional(CONF_MCP_PERMANENT_TOOLS, default=[]): SelectSelector(
+                    SelectSelectorConfig(
+                        options=tool_options,
+                        multiple=True,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(
+                    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+                    default=DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS,
+                ): BooleanSelector(),
+                vol.Required(
+                    CONF_MCP_ON_DEMAND_DISCOVERY,
+                    default=DEFAULT_MCP_ON_DEMAND_DISCOVERY,
+                ): BooleanSelector(),
+                vol.Required(
+                    CONF_MCP_REGEX_TIMEOUT,
+                    default=DEFAULT_MCP_REGEX_TIMEOUT,
+                ): NumberSelector(
+                    NumberSelectorConfig(min=0.01, step=0.01)
+                ),
+            }
+        )
+
         return self.async_show_form(
             step_id="mcp_tools",
-            data_schema=vol.Schema({}),
+            data_schema=schema,
             description_placeholders={
                 "server_name": self._mcp_discovery.server.name,
                 "tool_count": str(len(self._mcp_discovery.tools)),
             },
+        )
+
+    async def async_step_mcp_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Configure MCP policies when initial tool discovery was skipped."""
+        if self._mcp_config is None:
+            return self.async_abort(reason="mcp_invalid_flow_state")
+
+        return self.async_show_form(
+            step_id="mcp_options",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_MCP_ON_DEMAND_DISCOVERY,
+                        default=DEFAULT_MCP_ON_DEMAND_DISCOVERY,
+                    ): BooleanSelector(),
+                    vol.Required(
+                        CONF_MCP_REGEX_TIMEOUT,
+                        default=DEFAULT_MCP_REGEX_TIMEOUT,
+                    ): NumberSelector(
+                        NumberSelectorConfig(min=0.01, step=0.01)
+                    ),
+                }
+            ),
         )
 
     @classmethod

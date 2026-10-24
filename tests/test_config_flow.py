@@ -41,6 +41,13 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPServerInformation,
     MCPTool,
 )
+from custom_components.extended_openai_conversation.mcp_client.mcp_const import (
+    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    CONF_MCP_ON_DEMAND_DISCOVERY,
+    CONF_MCP_PERMANENT_TOOL_EXPOSURE,
+    CONF_MCP_PERMANENT_TOOLS,
+    CONF_MCP_REGEX_TIMEOUT,
+)
 from homeassistant.const import CONF_API_KEY
 from homeassistant.exceptions import HomeAssistantError
 
@@ -185,6 +192,67 @@ async def test_mcp_discover_step_keeps_catalogue_and_opens_tools(hass):
     assert flow._mcp_discovery is discovery
     flow.async_step_mcp_tools.assert_awaited_once_with()
     flow.async_create_entry.assert_not_called()
+
+
+async def test_mcp_tools_step_displays_catalogue_and_policy_options(hass):
+    """The post-discovery page exposes every tool and service-level policy."""
+    flow = _config_flow(hass)
+    flow._mcp_discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(
+            MCPTool(
+                name="read_secret",
+                title="Read secret",
+                description="Read a stored secret.",
+                input_schema={"type": "object"},
+                output_schema=None,
+                definition={"name": "read_secret"},
+            ),
+            MCPTool(
+                name="write_secret",
+                title=None,
+                description="Write a stored secret.",
+                input_schema={"type": "object"},
+                output_schema=None,
+                definition={"name": "write_secret"},
+            ),
+        ),
+    )
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+    result = await flow.async_step_mcp_tools()
+
+    assert result == {"type": "form"}
+    call = flow.async_show_form.call_args.kwargs
+    assert call["step_id"] == "mcp_tools"
+    assert call["description_placeholders"] == {
+        "server_name": "Vault Server",
+        "tool_count": "2",
+    }
+    schema = call["data_schema"].schema
+    assert _schema_keys(schema) == {
+        CONF_MCP_PERMANENT_TOOL_EXPOSURE,
+        CONF_MCP_PERMANENT_TOOLS,
+        CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+        CONF_MCP_ON_DEMAND_DISCOVERY,
+        CONF_MCP_REGEX_TIMEOUT,
+    }
+    permanent_tools = next(
+        selector
+        for marker, selector in schema.items()
+        if getattr(marker, "schema", marker) == CONF_MCP_PERMANENT_TOOLS
+    )
+    assert permanent_tools.config["multiple"] is True
+    assert permanent_tools.config["options"] == [
+        {"value": "read_secret", "label": "Read secret"},
+        {"value": "write_secret", "label": "write_secret"},
+    ]
 
 
 async def test_mcp_discover_failure_redisplays_form_for_retry(hass):
