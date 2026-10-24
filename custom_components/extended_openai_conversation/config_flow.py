@@ -2,29 +2,32 @@
 
 from __future__ import annotations
 
-import asyncio
+from collections.abc import Mapping
+from contextlib import AbstractContextManager
 import logging
 import types
-from typing import Any
-from urllib.parse import parse_qs, urlparse
+from typing import Any, override
 
-from mcp.client.auth import OAuthFlowError
 from openai._exceptions import APIConnectionError, AuthenticationError
 import probatio as vol
 import yaml
 
 from homeassistant.config_entries import (
+    SOURCE_REAUTH,
     ConfigEntry,
     ConfigEntryState,
-    ConfigFlow,
     ConfigFlowResult,
     ConfigSubentryFlow,
     SubentryFlowResult,
 )
-from homeassistant.const import CONF_API_KEY, CONF_NAME
+from homeassistant.const import CONF_API_KEY, CONF_NAME, CONF_TOKEN
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.network import NoURLAvailableError, get_url
+from homeassistant.exceptions import HomeAssistantError, UnknownImplementationError
+from homeassistant.helpers.config_entry_oauth2_flow import (
+    AbstractOAuth2FlowHandler,
+    async_get_config_entry_implementation,
+    async_get_implementations,
+)
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -37,6 +40,7 @@ from homeassistant.helpers.selector import (
     TemplateSelector,
 )
 
+from .application_credentials import oauth_application_context
 from .const import (
     API_PROVIDERS,
     CONF_ADVANCED_OPTIONS,
@@ -91,40 +95,33 @@ from .const import (
 )
 from .helpers import get_authenticated_client, get_model_config, get_service_type
 from .mcp_client import (
+    CONF_MCP_AUTHORIZATION_URL,
     CONF_MCP_DESCRIPTION,
     CONF_MCP_HEADERS,
     CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    CONF_MCP_OAUTH_SCOPE,
     CONF_MCP_ON_DEMAND_DISCOVERY,
     CONF_MCP_PERMANENT_TOOL_EXPOSURE,
     CONF_MCP_PERMANENT_TOOLS,
     CONF_MCP_REGEX_TIMEOUT,
     CONF_MCP_SERVER_ID,
     CONF_MCP_SERVER_URL,
+    CONF_MCP_TOKEN_URL,
     CONF_MCP_USE_OAUTH,
     DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS,
     DEFAULT_MCP_ON_DEMAND_DISCOVERY,
     DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
     DEFAULT_MCP_REGEX_TIMEOUT,
-    MCPClient,
     MCPClientConfigFlow,
     MCPClientConfigFlowResult,
     MCPConfigError,
     MCPContextEstimate,
     MCPDiscoveryResult,
-    MCPOAuthStorage,
     MCPServerConfig,
     MCPServiceConfig,
-    create_mcp_oauth_provider,
+    async_discover_mcp_oauth,
 )
-from .mcp_oauth import (
-    MCP_OAUTH_CALLBACK_PATH,
-    MCPOAuthAttempt,
-    async_load_mcp_oauth_storage,
-    async_setup_mcp_oauth_callback,
-    create_mcp_oauth_attempt,
-    register_mcp_oauth_attempt,
-    remove_mcp_oauth_attempt,
-)
+from .mcp_oauth import oauth_application_context_from_data, static_oauth_auth
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -219,10 +216,12 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     )
 
 
-class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
+class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
     """Handle a config flow for OpenAI Conversation."""
 
     VERSION = 2
+    DOMAIN = DOMAIN
+    logger = _LOGGER
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -231,10 +230,8 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self._mcp_discovery: MCPDiscoveryResult | None = None
         self._mcp_options: dict[str, Any] | None = None
         self._mcp_service_config: MCPServiceConfig | None = None
-        self._mcp_oauth_storage: MCPOAuthStorage | None = None
+        self._mcp_oauth_data: dict[str, Any] | None = None
         self._mcp_oauth_authenticated: bool = False
-        self._mcp_oauth_attempt: MCPOAuthAttempt | None = None
-        self._mcp_oauth_task: asyncio.Task[None] | None = None
         self._selected_service_type: str | None = None
         self._ai_endpoint_data: dict[str, Any] | None = None
         self._draft_revision: int = 0
@@ -360,7 +357,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._mcp_service_config = None
                 self._mark_draft_changed()
             if self._oauth_connection_changed(previous_config, result.config):
-                self._mcp_oauth_storage = None
+                self._mcp_oauth_data = None
                 self._mcp_oauth_authenticated = False
             self._mcp_config = result.config
             self._workflow_status = "MCP server configuration is valid."
@@ -406,105 +403,83 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_mcp_authenticate(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Authenticate an OAuth-protected MCP server."""
+        """Discover OAuth endpoints and start Home Assistant's OAuth flow."""
         if self._mcp_config is None or not self._mcp_config.use_oauth:
             return self.async_abort(reason="mcp_invalid_flow_state")
-        config = self._mcp_config
-
-        if user_input is not None:
-            attempt = self._mcp_oauth_attempt
-            if user_input.get("authenticated"):
-                self._mcp_oauth_authenticated = True
-                self._workflow_status = "MCP OAuth authentication succeeded."
-            else:
-                self._mcp_oauth_authenticated = False
-                self._workflow_status = "Unable to authenticate with the MCP server."
-            if attempt is not None:
-                remove_mcp_oauth_attempt(self.hass, attempt)
-            self._mcp_oauth_attempt = None
-            self._mcp_oauth_task = None
-            return self.async_external_step_done(next_step_id="service_menu")
-
-        async_setup_mcp_oauth_callback(self.hass)
         try:
-            redirect_uri = (
-                f"{get_url(self.hass, prefer_external=True).rstrip('/')}"
-                f"{MCP_OAUTH_CALLBACK_PATH}"
-            )
-        except NoURLAvailableError:
+            oauth_config = await async_discover_mcp_oauth(self._mcp_config.url)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to discover MCP OAuth metadata")
             self._workflow_status = (
-                "Home Assistant needs an accessible URL before OAuth can start."
+                "Unable to discover OAuth settings from the MCP server."
             )
             return await self.async_step_service_menu()
-        if self._mcp_oauth_storage is None:
-            self._mcp_oauth_storage = await async_load_mcp_oauth_storage(
-                self.hass,
-                config.server_id,
-                {},
-                prefer_seed=True,
-            )
-        storage = self._mcp_oauth_storage
-        attempt = create_mcp_oauth_attempt(self.flow_id)
-        self._mcp_oauth_attempt = attempt
 
-        async def redirect_handler(authorization_url: str) -> None:
-            query = parse_qs(urlparse(authorization_url).query)
-            state = query.get("state", [None])[0]
-            if state is None:
-                raise OAuthFlowError("Authorization URL did not include state")
-            register_mcp_oauth_attempt(self.hass, state, attempt)
-            if not attempt.authorization_url.done():
-                attempt.authorization_url.set_result(authorization_url)
-
-        async def callback_handler() -> tuple[str, str | None]:
-            return await attempt.callback
-
-        provider = create_mcp_oauth_provider(
-            config,
-            storage,
-            redirect_uri=redirect_uri,
-            redirect_handler=redirect_handler,
-            callback_handler=callback_handler,
-        )
-
-        async def authenticate() -> None:
-            error: str | None = None
-            try:
-                async with MCPClient(config, auth=provider) as client:
-                    await client.check_connection()
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected error during MCP OAuth authentication")
-                error = "oauth_failed"
-            if not attempt.completion.done():
-                attempt.completion.set_result(error)
-
-        self._mcp_oauth_task = self.hass.async_create_task(authenticate())
-        waitables: set[asyncio.Future[Any]] = {
-            attempt.authorization_url,
-            attempt.completion,
+        self._mcp_oauth_data = {
+            CONF_MCP_AUTHORIZATION_URL: oauth_config.authorization_url,
+            CONF_MCP_TOKEN_URL: oauth_config.token_url,
+            CONF_MCP_OAUTH_SCOPE: list(oauth_config.scopes),
+            CONF_MCP_SERVER_URL: oauth_config.resource,
         }
-        done, _ = await asyncio.wait(
-            waitables,
-            timeout=30,
-            return_when=asyncio.FIRST_COMPLETED,
+        return await self.async_step_credentials_choice()
+
+    async def async_step_credentials_choice(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose existing Application Credentials or add new credentials."""
+        if self._mcp_oauth_data is None:
+            return self.async_abort(reason="mcp_invalid_flow_state")
+        with self._oauth_application_context():
+            if not await async_get_implementations(self.hass, self.DOMAIN):
+                return await self.async_step_new_credentials()
+        return self.async_show_menu(
+            step_id="credentials_choice",
+            menu_options=["pick_implementation", "new_credentials"],
         )
-        if attempt.authorization_url in done:
-            return self.async_external_step(
-                step_id="mcp_authenticate",
-                url=attempt.authorization_url.result(),
+
+    async def async_step_new_credentials(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Direct Home Assistant to collect Application Credentials."""
+        return self.async_abort(reason="missing_credentials")
+
+    @override
+    async def async_step_pick_implementation(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Resolve credentials against the current MCP authorization server."""
+        with self._oauth_application_context():
+            return await super().async_step_pick_implementation(user_input)
+
+    @property
+    @override
+    def extra_authorize_data(self) -> dict[str, str]:
+        """Request the scopes advertised by the MCP authorization server."""
+        data: dict[str, str] = {"access_type": "offline", "prompt": "consent"}
+        if self._mcp_oauth_data is not None and (
+            scopes := self._mcp_oauth_data.get(CONF_MCP_OAUTH_SCOPE)
+        ):
+            data["scope"] = " ".join(scopes)
+        return {**data, **super().extra_authorize_data}
+
+    @override
+    async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:
+        """Retain HA-managed OAuth data, then return to the service workflow."""
+        if self._mcp_oauth_data is None:
+            return self.async_abort(reason="mcp_invalid_flow_state")
+        oauth_data = {**self._mcp_oauth_data, **data}
+
+        if self.source == SOURCE_REAUTH:
+            entry = self._get_reauth_entry()
+            return self.async_update_reload_and_abort(
+                entry,
+                data={**entry.data, **oauth_data},
             )
 
-        if attempt.completion in done and attempt.completion.result() is None:
-            self._mcp_oauth_authenticated = True
-            self._workflow_status = "Existing MCP OAuth credentials are valid."
-        else:
-            self._mcp_oauth_authenticated = False
-            self._workflow_status = "Unable to start MCP OAuth authentication."
-            if self._mcp_oauth_task is not None and not self._mcp_oauth_task.done():
-                self._mcp_oauth_task.cancel()
-        remove_mcp_oauth_attempt(self.hass, attempt)
-        self._mcp_oauth_attempt = None
-        self._mcp_oauth_task = None
+        self._mcp_oauth_data = oauth_data
+        self._mcp_oauth_authenticated = True
+        self._mark_draft_changed()
+        self._workflow_status = "MCP OAuth authentication succeeded."
         return await self.async_step_service_menu()
 
     async def async_step_mcp_ask_discovery(
@@ -527,15 +502,10 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             if self._mcp_config.use_oauth:
                 self._mcp_discovery = await processor.discover(
-                    self._mcp_config, auth=self._mcp_oauth_provider()
+                    self._mcp_config, auth=self._mcp_oauth_auth()
                 )
             else:
                 self._mcp_discovery = await processor.discover(self._mcp_config)
-        except OAuthFlowError:
-            _LOGGER.exception("MCP OAuth credentials require authorization")
-            self._mcp_oauth_authenticated = False
-            self._workflow_status = "Authenticate with the MCP server again."
-            return await self.async_step_service_menu()
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected error during MCP tool discovery")
             self._workflow_status = "Unable to retrieve tools from the MCP server."
@@ -839,6 +809,33 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             ],
         )
 
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Start Home Assistant's standard OAuth reauthentication flow."""
+        entry = self._get_reauth_entry()
+        service_config = MCPServiceConfig.from_dict(entry.data)
+        self._selected_service_type = SERVICE_TYPE_MCP
+        self._mcp_config = service_config.server
+        self._mcp_oauth_data = dict(entry.data)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: Mapping[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm and launch OAuth reauthentication."""
+        if user_input is None:
+            return self.async_show_form(step_id="reauth_confirm")
+        entry = self._get_reauth_entry()
+        try:
+            with self._oauth_application_context():
+                self.flow_impl = await async_get_config_entry_implementation(
+                    self.hass, entry
+                )
+        except UnknownImplementationError:
+            return await self.async_step_mcp_authenticate()
+        return await self.async_step_auth()
+
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -861,10 +858,18 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             }
             self._mcp_service_config = service_config
             if service_config.server.use_oauth:
-                self._mcp_oauth_storage = await async_load_mcp_oauth_storage(
-                    self.hass, service_config.server.server_id, dict(entry.data)
-                )
-                self._mcp_oauth_authenticated = self._mcp_oauth_storage.is_authenticated
+                self._mcp_oauth_data = {
+                    key: entry.data[key]
+                    for key in (
+                        CONF_MCP_AUTHORIZATION_URL,
+                        CONF_MCP_TOKEN_URL,
+                        CONF_MCP_OAUTH_SCOPE,
+                        "auth_implementation",
+                        CONF_TOKEN,
+                    )
+                    if key in entry.data
+                }
+                self._mcp_oauth_authenticated = CONF_TOKEN in self._mcp_oauth_data
         else:
             self._ai_endpoint_data = dict(entry.data)
         self._draft_revision = 1
@@ -892,22 +897,22 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         if service_config.server.use_oauth and not self._mcp_oauth_authenticated:
             return None
         data = {**service_config.to_dict(), CONF_SERVICE_TYPE: SERVICE_TYPE_MCP}
-        if service_config.server.use_oauth and self._mcp_oauth_storage is not None:
-            data.update(self._mcp_oauth_storage.to_dict())
+        if service_config.server.use_oauth and self._mcp_oauth_data is not None:
+            data.update(self._mcp_oauth_data)
         return data
 
-    def _mcp_oauth_provider(self) -> Any:
-        """Return an SDK provider backed by the current OAuth state."""
-        if (
-            self._mcp_config is None
-            or self._mcp_oauth_storage is None
-            or self._mcp_oauth_storage.redirect_uri is None
-        ):
-            raise OAuthFlowError("MCP OAuth authentication has not been configured")
-        return create_mcp_oauth_provider(
-            self._mcp_config,
-            self._mcp_oauth_storage,
-            redirect_uri=self._mcp_oauth_storage.redirect_uri,
+    def _mcp_oauth_auth(self) -> Any:
+        """Return static bearer authentication for config-flow MCP requests."""
+        if self._mcp_oauth_data is None or CONF_TOKEN not in self._mcp_oauth_data:
+            raise HomeAssistantError("MCP OAuth authentication has not completed")
+        return static_oauth_auth(self._mcp_oauth_data)
+
+    def _oauth_application_context(self) -> AbstractContextManager[None]:
+        """Activate the current server for Home Assistant Application Credentials."""
+        if self._mcp_oauth_data is None:
+            raise HomeAssistantError("MCP OAuth metadata has not been discovered")
+        return oauth_application_context(
+            oauth_application_context_from_data(self._mcp_oauth_data)
         )
 
     @staticmethod

@@ -5,10 +5,9 @@ CONF_MCP_SERVER_URL = "url"
 CONF_MCP_DESCRIPTION = "description"
 CONF_MCP_HEADERS = "headers"
 CONF_MCP_USE_OAUTH = "use_oauth"
-
-CONF_MCP_OAUTH_TOKENS = "oauth_tokens"
-CONF_MCP_OAUTH_CLIENT_INFO = "oauth_client_info"
-CONF_MCP_OAUTH_REDIRECT_URI = "oauth_redirect_uri"
+CONF_MCP_AUTHORIZATION_URL = "authorization_url"
+CONF_MCP_TOKEN_URL = "token_url"
+CONF_MCP_OAUTH_SCOPE = "scope"
 
 CONF_MCP_CATALOGUE_ID = "catalogue_id"
 CONF_MCP_SERVER_INFORMATION = "server_information"

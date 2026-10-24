@@ -7,6 +7,7 @@
   ],
   "config_flow": true,
   "dependencies": [
+    "application_credentials",
     "ai_task",
     "conversation",
     "energy",

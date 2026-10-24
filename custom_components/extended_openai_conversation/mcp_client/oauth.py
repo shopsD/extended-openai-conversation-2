@@ -1,127 +1,115 @@
-"""Framework-independent MCP OAuth helpers."""
+"""Framework-independent MCP OAuth metadata discovery."""
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from dataclasses import dataclass
+from urllib.parse import urljoin
 
-from mcp.client.auth import OAuthClientProvider, TokenStorage
-from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
-from pydantic import AnyUrl
-
-from .config import MCPServerConfig
-from .mcp_const import (
-    CONF_MCP_OAUTH_CLIENT_INFO,
-    CONF_MCP_OAUTH_REDIRECT_URI,
-    CONF_MCP_OAUTH_TOKENS,
+import httpx
+from mcp.client.auth.oauth2 import (
+    build_oauth_authorization_server_metadata_discovery_urls,
+    build_protected_resource_metadata_discovery_urls,
 )
+from mcp.shared.auth import OAuthMetadata, ProtectedResourceMetadata
+from pydantic import ValidationError
 
-type OAuthStorageUpdateCallback = Callable[[dict[str, Any]], Awaitable[None]]
-
-
-class MCPOAuthStorage(TokenStorage):
-    """Store serializable OAuth tokens and dynamic client registration data."""
-
-    def __init__(
-        self,
-        *,
-        tokens: OAuthToken | None = None,
-        client_info: OAuthClientInformationFull | None = None,
-        redirect_uri: str | None = None,
-        update_callback: OAuthStorageUpdateCallback | None = None,
-    ) -> None:
-        """Initialize OAuth storage."""
-        self.tokens = tokens
-        self.client_info = client_info
-        self.redirect_uri = redirect_uri
-        self._update_callback = update_callback
-
-    @classmethod
-    def from_dict(
-        cls,
-        data: Mapping[str, Any],
-        *,
-        update_callback: OAuthStorageUpdateCallback | None = None,
-    ) -> MCPOAuthStorage:
-        """Restore OAuth state from a host-owned mapping."""
-        tokens = data.get(CONF_MCP_OAUTH_TOKENS)
-        client_info = data.get(CONF_MCP_OAUTH_CLIENT_INFO)
-        redirect_uri = data.get(CONF_MCP_OAUTH_REDIRECT_URI)
-        return cls(
-            tokens=(
-                OAuthToken.model_validate(tokens)
-                if isinstance(tokens, Mapping)
-                else None
-            ),
-            client_info=(
-                OAuthClientInformationFull.model_validate(client_info)
-                if isinstance(client_info, Mapping)
-                else None
-            ),
-            redirect_uri=redirect_uri if isinstance(redirect_uri, str) else None,
-            update_callback=update_callback,
-        )
-
-    @property
-    def is_authenticated(self) -> bool:
-        """Return whether an access token is available."""
-        return self.tokens is not None and bool(self.tokens.access_token)
-
-    async def get_tokens(self) -> OAuthToken | None:
-        """Return stored OAuth tokens."""
-        return self.tokens
-
-    async def set_tokens(self, tokens: OAuthToken) -> None:
-        """Persist updated OAuth tokens."""
-        self.tokens = tokens
-        await self._async_updated()
-
-    async def get_client_info(self) -> OAuthClientInformationFull | None:
-        """Return stored dynamic client registration information."""
-        return self.client_info
-
-    async def set_client_info(self, client_info: OAuthClientInformationFull) -> None:
-        """Persist dynamic client registration information."""
-        self.client_info = client_info
-        await self._async_updated()
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return serializable OAuth state."""
-        data: dict[str, Any] = {}
-        if self.tokens is not None:
-            data[CONF_MCP_OAUTH_TOKENS] = self.tokens.model_dump(
-                mode="json", exclude_none=True
-            )
-        if self.client_info is not None:
-            data[CONF_MCP_OAUTH_CLIENT_INFO] = self.client_info.model_dump(
-                mode="json", exclude_none=True
-            )
-        if self.redirect_uri is not None:
-            data[CONF_MCP_OAUTH_REDIRECT_URI] = self.redirect_uri
-        return data
-
-    async def _async_updated(self) -> None:
-        if self._update_callback is not None:
-            await self._update_callback(self.to_dict())
+from .mcp_errors import MCPAuthenticationError
 
 
-def create_mcp_oauth_provider(
-    config: MCPServerConfig,
-    storage: MCPOAuthStorage,
+@dataclass(frozen=True, slots=True)
+class MCPOAuthConfiguration:
+    """OAuth endpoints and scopes advertised for an MCP resource."""
+
+    authorization_url: str
+    token_url: str
+    resource: str
+    scopes: tuple[str, ...] = ()
+
+
+async def async_discover_mcp_oauth(
+    server_url: str,
     *,
-    redirect_uri: str,
-    redirect_handler: Callable[[str], Awaitable[None]] | None = None,
-    callback_handler: Callable[[], Awaitable[tuple[str, str | None]]] | None = None,
-) -> OAuthClientProvider:
-    """Create the SDK OAuth provider for one MCP server."""
-    storage.redirect_uri = redirect_uri
-    return OAuthClientProvider(
-        server_url=config.url,
-        client_metadata=OAuthClientMetadata(
-            client_name=config.name,
-            redirect_uris=[AnyUrl(redirect_uri)],
-        ),
-        storage=storage,
-        redirect_handler=redirect_handler,
-        callback_handler=callback_handler,
+    resource_metadata_url: str | None = None,
+    http_client: httpx.AsyncClient | None = None,
+) -> MCPOAuthConfiguration:
+    """Discover OAuth metadata using the MCP authorization specification."""
+    owns_client = http_client is None
+    client = http_client or httpx.AsyncClient(follow_redirects=False)
+    try:
+        resource_metadata = await _async_discover_resource_metadata(
+            client, server_url, resource_metadata_url
+        )
+        authorization_server = (
+            str(resource_metadata.authorization_servers[0])
+            if resource_metadata is not None
+            and resource_metadata.authorization_servers
+            else None
+        )
+        oauth_metadata = await _async_discover_authorization_metadata(
+            client, server_url, authorization_server
+        )
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    scopes = (
+        resource_metadata.scopes_supported
+        if resource_metadata is not None
+        and resource_metadata.scopes_supported is not None
+        else oauth_metadata.scopes_supported or []
     )
+    endpoint_base = authorization_server or server_url
+    return MCPOAuthConfiguration(
+        authorization_url=urljoin(
+            endpoint_base, str(oauth_metadata.authorization_endpoint)
+        ),
+        token_url=urljoin(endpoint_base, str(oauth_metadata.token_endpoint)),
+        resource=server_url,
+        scopes=tuple(scopes),
+    )
+
+
+async def _async_discover_resource_metadata(
+    client: httpx.AsyncClient,
+    server_url: str,
+    resource_metadata_url: str | None,
+) -> ProtectedResourceMetadata | None:
+    """Return the first valid protected-resource metadata response, if any."""
+    urls = build_protected_resource_metadata_discovery_urls(
+        resource_metadata_url, server_url
+    )
+    for url in urls:
+        try:
+            response = await client.get(url)
+        except httpx.HTTPError:
+            continue
+        if response.status_code != 200:
+            continue
+        try:
+            return ProtectedResourceMetadata.model_validate_json(response.content)
+        except ValidationError:
+            continue
+    return None
+
+
+async def _async_discover_authorization_metadata(
+    client: httpx.AsyncClient,
+    server_url: str,
+    authorization_server: str | None,
+) -> OAuthMetadata:
+    """Return authorization-server metadata or raise a useful public error."""
+    urls = build_oauth_authorization_server_metadata_discovery_urls(
+        authorization_server, server_url
+    )
+    for url in urls:
+        try:
+            response = await client.get(url)
+        except httpx.HTTPError:
+            continue
+        if response.status_code != 200:
+            continue
+        try:
+            return OAuthMetadata.model_validate_json(response.content)
+        except ValidationError:
+            continue
+    raise MCPAuthenticationError("Unable to discover the MCP authorization server")
