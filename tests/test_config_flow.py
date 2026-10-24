@@ -255,6 +255,63 @@ async def test_mcp_tools_step_displays_catalogue_and_policy_options(hass):
     ]
 
 
+async def test_mcp_tools_submission_opens_context_review(hass):
+    """Selected permanent tools produce a context estimate for review."""
+    flow = _config_flow(hass)
+    flow._mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+        description="Storage tools",
+    )
+    flow._mcp_discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(
+            MCPTool(
+                name="read_secret",
+                title="Read secret",
+                description="Read a stored secret.",
+                input_schema={
+                    "type": "object",
+                    "properties": {"key": {"type": "string"}},
+                },
+                output_schema=None,
+                definition={"name": "read_secret"},
+            ),
+        ),
+    )
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    selection = {
+        CONF_MCP_PERMANENT_TOOL_EXPOSURE: True,
+        CONF_MCP_PERMANENT_TOOLS: ["read_secret"],
+        CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: True,
+        CONF_MCP_ON_DEMAND_DISCOVERY: True,
+        CONF_MCP_REGEX_TIMEOUT: 0.1,
+    }
+
+    result = await flow.async_step_mcp_tools(selection)
+
+    assert result == {"type": "form"}
+    assert flow._mcp_options == selection
+    call = flow.async_show_form.call_args.kwargs
+    assert call["step_id"] == "mcp_review"
+    placeholders = call["description_placeholders"]
+    assert placeholders["permanent_exposure"] == "Yes"
+    assert placeholders["selected_tool_count"] == "1"
+    assert placeholders["schemas_included"] == "Yes"
+    assert placeholders["on_demand_discovery"] == "Yes"
+    assert placeholders["regex_timeout"] == "0.1"
+    assert int(placeholders["character_count"].replace(",", "")) > 0
+    assert int(placeholders["byte_count"].replace(",", "")) > 0
+    assert int(placeholders["estimated_tokens"].replace(",", "")) > 0
+
+
 async def test_mcp_discover_failure_redisplays_form_for_retry(hass):
     """Failed discovery preserves the configuration and permits another attempt."""
     flow = _config_flow(hass)

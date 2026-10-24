@@ -6,7 +6,9 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPClientConfigFlow,
     MCPConfigError,
     MCPServerConfig,
+    MCPTool,
     MCPUtils,
+    estimate_permanent_context,
 )
 
 
@@ -67,6 +69,43 @@ def test_generate_server_id_uses_first_available_suffix():
         MCPUtils.generate_server_id({"mcp_server", "mcp_server_2"})
         == "mcp_server_3"
     )
+
+
+def test_permanent_context_estimate_uses_the_rendered_schema_content():
+    """Schema inclusion changes the exact context and its estimated token cost."""
+    config = MCPServerConfig(
+        server_id="vault",
+        name="Vault MCP",
+        url="https://mcp.example.com/api",
+        description="Storage tools",
+    )
+    tools = (
+        MCPTool(
+            name="read_secret",
+            title="Read secret",
+            description="Read a stored secret.",
+            input_schema={
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+            },
+            output_schema=None,
+            definition={"name": "read_secret"},
+        ),
+    )
+
+    metadata_only = estimate_permanent_context(
+        config, tools, include_schemas=False
+    )
+    with_schemas = estimate_permanent_context(
+        config, tools, include_schemas=True
+    )
+
+    assert metadata_only.selected_tool_count == 1
+    assert '"input_schema"' not in metadata_only.content
+    assert '"input_schema"' in with_schemas.content
+    assert with_schemas.character_count > metadata_only.character_count
+    assert with_schemas.byte_count > metadata_only.byte_count
+    assert with_schemas.estimated_tokens > metadata_only.estimated_tokens
 
 
 def test_config_flow_returns_framework_independent_initial_values():

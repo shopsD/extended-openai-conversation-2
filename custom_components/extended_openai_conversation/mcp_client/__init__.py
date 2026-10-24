@@ -3,6 +3,7 @@
 from .config import MCPServerConfig
 from .mcp_client import MCPClient
 from .mcp_client_config_flow import MCPClientConfigFlow, MCPClientConfigFlowResult
+from .mcp_context import MCPContextEstimate, estimate_permanent_context
 from .mcp_datatypes import (
     MCPDiscoveryResult,
     MCPServerInformation,
@@ -24,6 +25,7 @@ __all__ = [
     "MCPClientConfigFlowResult",
     "MCPClientError",
     "MCPConfigError",
+    "MCPContextEstimate",
     "MCPDiscoveryResult",
     "MCPProtocolError",
     "MCPServerConfig",
@@ -31,4 +33,5 @@ __all__ = [
     "MCPTool",
     "MCPToolResult",
     "MCPUtils",
+    "estimate_permanent_context",
 ]
