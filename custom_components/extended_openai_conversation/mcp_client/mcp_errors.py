@@ -8,6 +8,15 @@ class MCPClientClosedError(MCPClientError):
 class MCPProtocolError(MCPClientError):
     """The remote server returned an invalid MCP protocol sequence."""
 
+class MCPConnectionError(MCPClientError):
+    """The MCP server could not be reached."""
+
+class MCPAuthenticationError(MCPClientError):
+    """The MCP server rejected authentication."""
+
+class MCPDiscoveryError(MCPClientError):
+    """The MCP server catalogue could not be discovered."""
+
 class MCPConfigError(ValueError):
     """An invalid MCP server configuration value."""
 

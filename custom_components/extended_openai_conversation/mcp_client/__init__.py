@@ -2,7 +2,7 @@
 
 from .config import MCPServerConfig
 from .mcp_client import MCPClient
-from .mcp_datatypes import MCPServerInformation, MCPTool, MCPToolResult
+from .mcp_datatypes import MCPDiscoveryResult, MCPServerInformation, MCPTool, MCPToolResult,
 from .mcp_errors import (
     MCPClientClosedError,
     MCPClientError,
@@ -18,6 +18,7 @@ __all__ = [
     "MCPConfigError",
     "MCPProtocolError",
     "MCPServerConfig",
+    "MCPDiscoveryResult",
     "MCPServerInformation",
     "MCPTool",
     "MCPToolResult",

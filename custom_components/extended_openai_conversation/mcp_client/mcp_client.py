@@ -132,14 +132,7 @@ class MCPClient:
             is_error=result.isError,
         )
 
-    async def check_connection(self) -> MCPServerInformation:
-        """Connect, initialize once, and return information about the server."""
-        async with self._operation_lock:
-            self._ensure_open()
-            async with self._session() as (_, initialization):
-                return self._server_information(initialization)
-
-    async def list_tools(self) -> tuple[MCPTool, ...]:
+    async def _list_tools(self, session: ClientSession) -> tuple[MCPTool, ...]:
         """Return the complete advertised tool catalogue across all SDK pages."""
         async with self._operation_lock:
             self._ensure_open()
@@ -160,11 +153,31 @@ class MCPClient:
                     seen_cursors.add(next_cursor)
                     cursor = next_cursor
 
-    async def call_tool(
-        self,
-        tool_name: str,
-        arguments: Mapping[str, Any] | None = None,
-    ) -> MCPToolResult:
+    async def discover(self) -> MCPDiscoveryResult:
+        """Initialize once and return server metadata and its complete catalogue."""
+        async with self._operation_lock:
+            self._ensure_open()
+            async with self._session() as (session, initialization):
+                return MCPDiscoveryResult(
+                    server=self._server_information(initialization),
+                    tools=await self._list_session_tools(session),
+                )
+
+    async def check_connection(self) -> MCPServerInformation:
+        """Connect, initialize once, and return information about the server."""
+        async with self._operation_lock:
+            self._ensure_open()
+            async with self._session() as (_, initialization):
+                return self._server_information(initialization)
+
+    async def list_tools(self) -> tuple[MCPTool, ...]:
+        """Return the complete advertised tool catalogue."""
+        async with self._operation_lock:
+            self._ensure_open()
+            async with self._session() as (session, _):
+                return await self._list_session_tools(session)
+
+    async def call_tool(self, tool_name: str, arguments: Mapping[str, Any] | None = None) -> MCPToolResult:
         """Invoke a tool once without automatically retrying side effects."""
         async with self._operation_lock:
             self._ensure_open()
