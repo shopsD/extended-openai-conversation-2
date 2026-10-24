@@ -5,6 +5,7 @@ import pytest
 from custom_components.extended_openai_conversation.mcp_client import (
     MCPClientConfigFlow,
     MCPConfigError,
+    MCPDiscoveryResult,
     MCPServerConfig,
     MCPServerInformation,
     MCPServiceConfig,
@@ -77,6 +78,103 @@ def test_service_config_round_trips_complete_permanent_catalogue():
         tool.input_schema
     )
     assert MCPServiceConfig.from_dict(persisted) == config
+
+
+def test_service_config_selection_keeps_only_selected_tool_snapshots():
+    """Selection validation stores complete definitions for selected tools."""
+    server = MCPServerConfig(
+        server_id="vault",
+        name="Vault MCP",
+        url="https://mcp.example.com/api",
+    )
+    tools = tuple(
+        MCPTool(
+            name=name,
+            title=None,
+            description=None,
+            input_schema={"type": "object"},
+            output_schema=None,
+            definition={"name": name},
+        )
+        for name in ("read_secret", "write_secret")
+    )
+    discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=tools,
+    )
+
+    config = MCPServiceConfig.from_selection(
+        server,
+        discovery,
+        permanent_tool_exposure=True,
+        selected_tool_names=["write_secret"],
+        include_permanent_schemas=True,
+        on_demand_discovery=True,
+        regex_timeout=0.1,
+    )
+
+    assert config.permanent_tools == (tools[1],)
+    assert config.server_information is discovery.server
+
+
+def test_service_config_selection_rejects_unknown_tool():
+    """A submitted tool name must exist in the discovered catalogue."""
+    server = MCPServerConfig(
+        server_id="vault",
+        name="Vault MCP",
+        url="https://mcp.example.com/api",
+    )
+    discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(),
+    )
+
+    with pytest.raises(MCPConfigError) as err:
+        MCPServiceConfig.from_selection(
+            server,
+            discovery,
+            permanent_tool_exposure=True,
+            selected_tool_names=["not_advertised"],
+            include_permanent_schemas=True,
+            on_demand_discovery=True,
+            regex_timeout=0.1,
+        )
+
+    assert err.value.field == "permanent_tools"
+    assert err.value.code == "invalid_permanent_tools"
+
+
+def test_service_config_selection_clears_disabled_permanent_policy():
+    """Disabled permanent exposure discards selections and schema exposure."""
+    config = MCPServiceConfig.from_selection(
+        MCPServerConfig(
+            server_id="vault",
+            name="Vault MCP",
+            url="https://mcp.example.com/api",
+        ),
+        None,
+        permanent_tool_exposure=False,
+        selected_tool_names=["ignored"],
+        include_permanent_schemas=True,
+        on_demand_discovery=True,
+        regex_timeout=0.1,
+    )
+
+    assert config.permanent_tools == ()
+    assert config.include_permanent_schemas is False
+    assert config.server_information is None
 
 
 @pytest.mark.parametrize(

@@ -7,6 +7,9 @@
             "invalid_auth": "Invalid authentication",
             "invalid_name": "Enter a name for the MCP service.",
             "invalid_server_id": "Use lowercase letters, numbers, underscores, or hyphens; the ID must start with a letter or number.",
+            "invalid_permanent_tools": "Select only tools advertised by this MCP server.",
+            "invalid_regex_timeout": "Enter a regular-expression timeout greater than zero.",
+            "mcp_discovery_required": "Discover the MCP server before selecting permanent tools.",
             "invalid_url": "Enter a valid HTTP or HTTPS URL.",
             "unknown": "Unexpected error",
             "mcp_tool_discovery_failed": "Unable to retrieve tools from the MCP server."

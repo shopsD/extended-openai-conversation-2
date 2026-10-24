@@ -312,6 +312,44 @@ async def test_mcp_tools_submission_opens_context_review(hass):
     assert int(placeholders["estimated_tokens"].replace(",", "")) > 0
 
 
+async def test_mcp_tools_rejects_tool_outside_discovered_catalogue(hass):
+    """Crafted tool selections cannot escape the discovered catalogue."""
+    flow = _config_flow(hass)
+    flow._mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+    )
+    flow._mcp_discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(),
+    )
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+    result = await flow.async_step_mcp_tools(
+        {
+            CONF_MCP_PERMANENT_TOOL_EXPOSURE: True,
+            CONF_MCP_PERMANENT_TOOLS: ["not_advertised"],
+            CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: True,
+            CONF_MCP_ON_DEMAND_DISCOVERY: True,
+            CONF_MCP_REGEX_TIMEOUT: 0.1,
+        }
+    )
+
+    assert result == {"type": "form"}
+    assert flow._mcp_service_config is None
+    assert flow.async_show_form.call_args.kwargs["step_id"] == "mcp_tools"
+    assert flow.async_show_form.call_args.kwargs["errors"] == {
+        CONF_MCP_PERMANENT_TOOLS: "invalid_permanent_tools"
+    }
+
+
 async def test_mcp_discover_failure_redisplays_form_for_retry(hass):
     """Failed discovery preserves the configuration and permits another attempt."""
     flow = _config_flow(hass)

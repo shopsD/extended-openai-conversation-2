@@ -104,9 +104,11 @@ from .helpers import get_authenticated_client, get_model_config, get_service_typ
 from .mcp_client import (
     MCPClientConfigFlow,
     MCPClientConfigFlowResult,
+    MCPConfigError,
     MCPContextEstimate,
     MCPDiscoveryResult,
     MCPServerConfig,
+    MCPServiceConfig,
     estimate_permanent_context,
 )
 from .skills import SkillManager
@@ -210,6 +212,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     _mcp_config: MCPServerConfig | None = None
     _mcp_discovery: MCPDiscoveryResult | None = None
     _mcp_options: dict[str, Any] | None = None
+    _mcp_service_config: MCPServiceConfig | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -359,8 +362,9 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._mcp_discovery is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._mcp_options = {
+            options = {
                 CONF_MCP_PERMANENT_TOOL_EXPOSURE: DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
                 CONF_MCP_PERMANENT_TOOLS: [],
                 CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS,
@@ -368,7 +372,9 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_MCP_REGEX_TIMEOUT: DEFAULT_MCP_REGEX_TIMEOUT,
                 **user_input,
             }
-            return await self.async_step_mcp_review()
+            errors = self._set_mcp_service_config(options)
+            if not errors:
+                return await self.async_step_mcp_review()
 
         values = self._mcp_options or {}
         tool_options = [
@@ -427,6 +433,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 "server_name": self._mcp_discovery.server.name,
                 "tool_count": str(len(self._mcp_discovery.tools)),
             },
+            errors=errors,
         )
 
     async def async_step_mcp_options(
@@ -436,14 +443,17 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._mcp_options = {
+            options = {
                 CONF_MCP_PERMANENT_TOOL_EXPOSURE: False,
                 CONF_MCP_PERMANENT_TOOLS: [],
                 CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: False,
                 **user_input,
             }
-            return await self.async_step_mcp_review()
+            errors = self._set_mcp_service_config(options)
+            if not errors:
+                return await self.async_step_mcp_review()
 
         values = self._mcp_options or {}
         return self.async_show_form(
@@ -468,7 +478,46 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                 }
             ),
+            errors=errors,
         )
+
+    def _set_mcp_service_config(self, options: dict[str, Any]) -> dict[str, str]:
+        """Validate MCP policies and retain their normalized service config."""
+        if self._mcp_config is None:
+            return {"base": "mcp_invalid_flow_state"}
+
+        try:
+            service_config = MCPServiceConfig.from_selection(
+                self._mcp_config,
+                self._mcp_discovery,
+                permanent_tool_exposure=options[
+                    CONF_MCP_PERMANENT_TOOL_EXPOSURE
+                ],
+                selected_tool_names=options[CONF_MCP_PERMANENT_TOOLS],
+                include_permanent_schemas=options[
+                    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS
+                ],
+                on_demand_discovery=options[CONF_MCP_ON_DEMAND_DISCOVERY],
+                regex_timeout=options[CONF_MCP_REGEX_TIMEOUT],
+            )
+        except MCPConfigError as err:
+            self._mcp_options = options
+            self._mcp_service_config = None
+            return {err.field: err.code}
+
+        self._mcp_service_config = service_config
+        self._mcp_options = {
+            CONF_MCP_PERMANENT_TOOL_EXPOSURE: service_config.permanent_tool_exposure,
+            CONF_MCP_PERMANENT_TOOLS: [
+                tool.name for tool in service_config.permanent_tools
+            ],
+            CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: (
+                service_config.include_permanent_schemas
+            ),
+            CONF_MCP_ON_DEMAND_DISCOVERY: service_config.on_demand_discovery,
+            CONF_MCP_REGEX_TIMEOUT: service_config.regex_timeout,
+        }
+        return {}
 
     async def async_step_mcp_review(
         self, user_input: dict[str, Any] | None = None

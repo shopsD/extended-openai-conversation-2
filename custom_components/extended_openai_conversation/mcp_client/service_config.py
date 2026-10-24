@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,7 +20,8 @@ from .mcp_const import (
     DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
     DEFAULT_MCP_REGEX_TIMEOUT,
 )
-from .mcp_datatypes import MCPServerInformation, MCPTool
+from .mcp_datatypes import MCPDiscoveryResult, MCPServerInformation, MCPTool
+from .mcp_errors import MCPConfigError
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,11 +43,53 @@ class MCPServiceConfig:
             or not isinstance(self.regex_timeout, (int, float))
             or self.regex_timeout <= 0
         ):
-            raise ValueError("regex_timeout must be greater than zero")
+            raise MCPConfigError("regex_timeout", "invalid_regex_timeout")
 
         tool_names = [tool.name for tool in self.permanent_tools]
         if len(tool_names) != len(set(tool_names)):
-            raise ValueError("permanent tool names must be unique")
+            raise MCPConfigError("permanent_tools", "invalid_permanent_tools")
+
+    @classmethod
+    def from_selection(
+        cls,
+        server: MCPServerConfig,
+        discovery: MCPDiscoveryResult | None,
+        *,
+        permanent_tool_exposure: bool,
+        selected_tool_names: Collection[str],
+        include_permanent_schemas: bool,
+        on_demand_discovery: bool,
+        regex_timeout: float,
+    ) -> MCPServiceConfig:
+        """Validate and normalize a service configuration selection."""
+        if (isinstance(selected_tool_names, str) or
+            not all(isinstance(name, str) for name in selected_tool_names)
+        ):
+            raise MCPConfigError("permanent_tools", "invalid_permanent_tools")
+
+        selected_names: set[str] = set(selected_tool_names)
+        if not permanent_tool_exposure:
+            selected_names.clear()
+            include_permanent_schemas = False
+        elif discovery is None:
+            raise MCPConfigError("permanent_tools", "mcp_discovery_required")
+
+        available_tools: tuple[MCPTool, ...] = discovery.tools if discovery is not None else ()
+        available_names: set[str] = {tool.name for tool in available_tools}
+        if selected_names - available_names:
+            raise MCPConfigError("permanent_tools", "invalid_permanent_tools")
+
+        return cls(
+            server=server,
+            permanent_tool_exposure=permanent_tool_exposure,
+            permanent_tools=tuple(
+                tool for tool in available_tools if tool.name in selected_names
+            ),
+            include_permanent_schemas=include_permanent_schemas,
+            on_demand_discovery=on_demand_discovery,
+            regex_timeout=regex_timeout,
+            server_information=discovery.server if discovery is not None else None,
+        )
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MCPServiceConfig:
