@@ -27,7 +27,13 @@ from .const import (
     SERVICE_TYPE_MCP,
 )
 from .helpers import get_authenticated_client, get_service_type
-from .mcp_client import MCPClient, MCPServerConfig
+from .mcp_client import (
+    CONF_MCP_OAUTH_REDIRECT_URI,
+    MCPClient,
+    MCPServerConfig,
+    create_mcp_oauth_provider,
+)
+from .mcp_oauth import async_load_mcp_oauth_storage, async_setup_mcp_oauth_callback
 from .services import async_setup_services
 from .template import async_setup_templates, async_unload_templates
 
@@ -41,18 +47,33 @@ type ExtendedOpenAIConfigEntry = ConfigEntry[AsyncClient | MCPClient]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up OpenAI Conversation."""
+    async_setup_mcp_oauth_callback(hass)
     await async_migrate_integration(hass)
     await async_setup_services(hass, config)
     return True
 
-async def async_setup_entry(hass: HomeAssistant, entry: ExtendedOpenAIConfigEntry) -> bool:
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ExtendedOpenAIConfigEntry
+) -> bool:
     """Set up OpenAI Conversation from a config entry."""
 
     if get_service_type(entry) == SERVICE_TYPE_MCP:
-        config = MCPServerConfig.from_dict(
-            {**entry.data, "name": entry.title}
-        )
-        entry.runtime_data = MCPClient(config)
+        config = MCPServerConfig.from_dict({**entry.data, "name": entry.title})
+        auth = None
+        if config.use_oauth:
+            storage = await async_load_mcp_oauth_storage(
+                hass, config.server_id, dict(entry.data)
+            )
+            redirect_uri = entry.data.get(CONF_MCP_OAUTH_REDIRECT_URI)
+            if not isinstance(redirect_uri, str):
+                raise ConfigEntryNotReady("MCP OAuth redirect URI is missing")
+            auth = create_mcp_oauth_provider(
+                config,
+                storage,
+                redirect_uri=redirect_uri,
+            )
+        entry.runtime_data = MCPClient(config, auth=auth)
         entry.async_on_unload(entry.add_update_listener(update_listener))
         return True
 
@@ -83,7 +104,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ExtendedOpenAIConfigEntr
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ExtendedOpenAIConfigEntry) -> bool:
+async def async_unload_entry(
+    hass: HomeAssistant, entry: ExtendedOpenAIConfigEntry
+) -> bool:
     """Unload OpenAI."""
     if get_service_type(entry) == SERVICE_TYPE_MCP:
         await cast(MCPClient, entry.runtime_data).aclose()

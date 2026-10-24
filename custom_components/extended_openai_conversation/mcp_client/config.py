@@ -32,6 +32,7 @@ def _validate_headers(headers: Mapping[str, str]) -> dict[str, str]:
         validated[name] = value
     return validated
 
+
 @dataclass(frozen=True, slots=True)
 class MCPServerConfig:
     """Validated configuration for one Streamable HTTP MCP server."""
@@ -41,6 +42,7 @@ class MCPServerConfig:
     url: str
     description: str = ""
     headers: Mapping[str, str] = field(default_factory=dict)
+    use_oauth: bool = False
 
     def __post_init__(self) -> None:
         """Validate and normalise configuration supplied by a host application."""
@@ -59,6 +61,8 @@ class MCPServerConfig:
             raise MCPConfigError("url", "invalid_url")
 
         headers = _validate_headers(self.headers)
+        if not isinstance(self.use_oauth, bool):
+            raise MCPConfigError("use_oauth", "invalid_oauth_setting")
 
         object.__setattr__(self, "server_id", server_id)
         object.__setattr__(self, "name", name)
@@ -75,6 +79,7 @@ class MCPServerConfig:
             url=data["url"],
             description=data.get("description", ""),
             headers=data.get("headers", {}),
+            use_oauth=data.get("use_oauth", False),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -85,4 +90,5 @@ class MCPServerConfig:
             "url": self.url,
             "description": self.description,
             "headers": dict(self.headers),
+            "use_oauth": self.use_oauth,
         }

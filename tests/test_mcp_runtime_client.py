@@ -197,3 +197,19 @@ async def test_close_closes_lazily_created_http_client():
         await client.aclose()
 
     http_client.aclose.assert_awaited_once_with()
+
+
+async def test_created_http_client_receives_injected_auth_provider():
+    """Host OAuth providers are attached without coupling the client to its host."""
+    session = _Session()
+    http_client = MagicMock(aclose=AsyncMock())
+    auth = MagicMock()
+
+    with (
+        patch(f"{MODULE}.httpx.AsyncClient", return_value=http_client) as client_class,
+        patch(f"{MODULE}.streamable_http_client", _transport),
+        patch(f"{MODULE}.ClientSession", return_value=session),
+    ):
+        await MCPClient(_config(), auth=auth).check_connection()
+
+    assert client_class.call_args.kwargs["auth"] is auth

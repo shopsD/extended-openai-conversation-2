@@ -16,6 +16,7 @@
           "switch_to_mcp": "Switch to Configure MCP Server",
           "ai_endpoint": "Configure AI Endpoint",
           "mcp": "Configure MCP Server",
+          "mcp_authenticate": "Authenticate MCP Server",
           "mcp_perform_discovery": "Discover MCP Tools",
           "mcp_skip_discovery": "Skip Discovery",
           "service_review": "Review Settings",
@@ -42,13 +43,19 @@
           "server_id": "Server ID",
           "description": "Description",
           "url": "Server URL",
-          "headers": "HTTP headers"
+          "headers": "HTTP headers",
+          "use_oauth": "Server uses OAuth"
         },
         "data_description": {
           "server_id": "A short, unique ID used by conversation-agent function configuration.",
           "description": "Optional model-visible description of the server's purpose.",
-          "headers": "Enter a YAML or JSON object of header names and string values. Example: Authorization: \"Bearer token\". Do not include an outer headers key. Quote numeric, boolean, or null-like values so they remain strings."
+          "headers": "Enter a YAML or JSON object of header names and string values. Example: Authorization: \"Bearer token\". Do not include an outer headers key. Quote numeric, boolean, or null-like values so they remain strings.",
+          "use_oauth": "Use the MCP OAuth authorization flow instead of supplying a static bearer token. After saving this page, select Authenticate MCP Server from the workflow menu."
         }
+      },
+      "mcp_authenticate": {
+        "title": "Authenticate MCP server",
+        "description": "A browser window will open so the MCP server's authorization provider can authenticate you. Home Assistant does not receive your username or password."
       },
       "mcp_ask_discovery": {
         "title": "MCP tool discovery",
@@ -108,6 +115,7 @@
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "duplicate_server_id": "Another MCP service already uses this server ID.",
       "invalid_headers": "HTTP header names and values must be valid strings.",
+      "invalid_oauth_setting": "Choose whether this server uses OAuth.",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
       "invalid_name": "Enter a name for the MCP service.",
       "invalid_server_id": "Use lowercase letters, numbers, underscores, or hyphens; the ID must start with a letter or number.",

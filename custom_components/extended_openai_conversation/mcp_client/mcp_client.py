@@ -38,6 +38,7 @@ class MCPClient:
         config: MCPServerConfig,
         *,
         http_client: httpx.AsyncClient | None = None,
+        auth: httpx.Auth | None = None,
         connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
         read_timeout: float = DEFAULT_READ_TIMEOUT,
     ) -> None:
@@ -47,6 +48,7 @@ class MCPClient:
 
         self.config: MCPServerConfig = config
         self._http_client: httpx.AsyncClient | None = http_client
+        self._auth: httpx.Auth | None = auth
         self._owns_http_client: bool = http_client is None
         self._http_timeout: httpx.Timeout = httpx.Timeout(
             connect_timeout,
@@ -77,7 +79,9 @@ class MCPClient:
         http_client: httpx.AsyncClient = self._get_http_client()
 
         async with (
-            streamable_http_client(url=self.config.url, http_client=http_client) as streams,
+            streamable_http_client(
+                url=self.config.url, http_client=http_client
+            ) as streams,
             ClientSession(
                 streams[0],
                 streams[1],
@@ -91,6 +95,7 @@ class MCPClient:
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(
                 headers=dict(self.config.headers),
+                auth=self._auth,
                 timeout=self._http_timeout,
                 follow_redirects=False,
             )
@@ -120,7 +125,9 @@ class MCPClient:
             title=tool.title,
             description=tool.description,
             input_schema=dict(tool.inputSchema),
-            output_schema=dict(tool.outputSchema) if tool.outputSchema is not None else None,
+            output_schema=dict(tool.outputSchema)
+            if tool.outputSchema is not None
+            else None,
             definition=tool.model_dump(mode="json", by_alias=True, exclude_none=True),
         )
 
@@ -132,7 +139,9 @@ class MCPClient:
                 for item in result.content
             ),
             structured_content=(
-                dict(result.structuredContent) if result.structuredContent is not None else None
+                dict(result.structuredContent)
+                if result.structuredContent is not None
+                else None
             ),
             is_error=result.isError,
         )
@@ -150,7 +159,9 @@ class MCPClient:
             if next_cursor is None:
                 return tuple(tools)
             if next_cursor in seen_cursors:
-                raise MCPProtocolError("MCP server repeated a tools/list pagination cursor")
+                raise MCPProtocolError(
+                    "MCP server repeated a tools/list pagination cursor"
+                )
 
             seen_cursors.add(next_cursor)
             cursor = next_cursor
@@ -179,7 +190,9 @@ class MCPClient:
             async with self._session() as (session, _):
                 return await self._list_session_tools(session)
 
-    async def call_tool(self, tool_name: str, arguments: Mapping[str, Any] | None = None) -> MCPToolResult:
+    async def call_tool(
+        self, tool_name: str, arguments: Mapping[str, Any] | None = None
+    ) -> MCPToolResult:
         """Invoke a tool once without automatically retrying side effects."""
         async with self._operation_lock:
             self._ensure_open()

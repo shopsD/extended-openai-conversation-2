@@ -20,6 +20,7 @@ _REQUIRED_TEXT_FIELDS = {
     "url": "invalid_url",
 }
 
+
 @dataclass(frozen=True, slots=True)
 class MCPClientConfigFlowResult:
     """Result for a host application to render or persist."""
@@ -41,17 +42,18 @@ class MCPClientConfigFlow:
         """Initialize processing with the server IDs reserved by the host."""
         self._existing_server_ids = frozenset(existing_server_ids)
 
-    def process(self, user_input: Mapping[str, Any] | None = None) -> MCPClientConfigFlowResult:
+    def process(
+        self, user_input: Mapping[str, Any] | None = None
+    ) -> MCPClientConfigFlowResult:
         """Return initial form values or process submitted connection data."""
         if user_input is None:
             return MCPClientConfigFlowResult(
                 values={
                     "name": DEFAULT_MCP_SERVER_NAME,
-                    "server_id": MCPUtils.generate_server_id(
-                        self._existing_server_ids
-                    ),
+                    "server_id": MCPUtils.generate_server_id(self._existing_server_ids),
                     "description": "",
                     "headers": {},
+                    "use_oauth": False,
                 },
                 errors={},
             )
@@ -84,8 +86,9 @@ class MCPClientConfigFlow:
             config=config,
         )
 
-    async def discover(self, config: MCPServerConfig) -> MCPDiscoveryResult:
+    async def discover(
+        self, config: MCPServerConfig, *, auth: Any | None = None
+    ) -> MCPDiscoveryResult:
         """Retrieve the server and tools catalogue."""
-        async with MCPClient(config) as client:
+        async with MCPClient(config, auth=auth) as client:
             return await client.discover()
-

@@ -8,6 +8,9 @@ from .mcp_const import (
     CONF_MCP_DESCRIPTION,
     CONF_MCP_HEADERS,
     CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    CONF_MCP_OAUTH_CLIENT_INFO,
+    CONF_MCP_OAUTH_REDIRECT_URI,
+    CONF_MCP_OAUTH_TOKENS,
     CONF_MCP_ON_DEMAND_DISCOVERY,
     CONF_MCP_PERMANENT_TOOL_CATALOGUE,
     CONF_MCP_PERMANENT_TOOL_EXPOSURE,
@@ -16,6 +19,7 @@ from .mcp_const import (
     CONF_MCP_SERVER_ID,
     CONF_MCP_SERVER_INFORMATION,
     CONF_MCP_SERVER_URL,
+    CONF_MCP_USE_OAUTH,
     DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS,
     DEFAULT_MCP_ON_DEMAND_DISCOVERY,
     DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
@@ -35,6 +39,7 @@ from .mcp_errors import (
     MCPProtocolError,
 )
 from .mcp_utils import MCPUtils
+from .oauth import MCPOAuthStorage, create_mcp_oauth_provider
 from .service_config import MCPServiceConfig
 
 __all__ = [
@@ -42,6 +47,9 @@ __all__ = [
     "CONF_MCP_DESCRIPTION",
     "CONF_MCP_HEADERS",
     "CONF_MCP_INCLUDE_PERMANENT_SCHEMAS",
+    "CONF_MCP_OAUTH_CLIENT_INFO",
+    "CONF_MCP_OAUTH_REDIRECT_URI",
+    "CONF_MCP_OAUTH_TOKENS",
     "CONF_MCP_ON_DEMAND_DISCOVERY",
     "CONF_MCP_PERMANENT_TOOLS",
     "CONF_MCP_PERMANENT_TOOL_CATALOGUE",
@@ -50,6 +58,7 @@ __all__ = [
     "CONF_MCP_SERVER_ID",
     "CONF_MCP_SERVER_INFORMATION",
     "CONF_MCP_SERVER_URL",
+    "CONF_MCP_USE_OAUTH",
     "DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS",
     "DEFAULT_MCP_ON_DEMAND_DISCOVERY",
     "DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE",
@@ -60,9 +69,9 @@ __all__ = [
     "MCPClientConfigFlowResult",
     "MCPClientError",
     "MCPConfigError",
-    "MCPConfigFlowTempData",
     "MCPContextEstimate",
     "MCPDiscoveryResult",
+    "MCPOAuthStorage",
     "MCPProtocolError",
     "MCPServerConfig",
     "MCPServerInformation",
@@ -70,4 +79,5 @@ __all__ = [
     "MCPTool",
     "MCPToolResult",
     "MCPUtils",
+    "create_mcp_oauth_provider",
 ]

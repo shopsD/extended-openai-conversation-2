@@ -1,5 +1,7 @@
 """Tests for the extractable MCP client public API."""
 
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from pydantic import AnyUrl
 import pytest
 
 from custom_components.extended_openai_conversation.mcp_client import (
@@ -7,6 +9,7 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPConfigError,
     MCPContextEstimate,
     MCPDiscoveryResult,
+    MCPOAuthStorage,
     MCPServerConfig,
     MCPServerInformation,
     MCPServiceConfig,
@@ -31,8 +34,44 @@ def test_server_config_normalises_and_serialises_values():
         "url": "https://mcp.example.com/api",
         "description": "Storage tools",
         "headers": {"Authorization": "Bearer token"},
+        "use_oauth": False,
     }
     assert MCPServerConfig.from_dict(config.to_dict()) == config
+
+
+def test_server_config_round_trips_oauth_selection():
+    """OAuth is an explicit, serializable server connection setting."""
+    config = MCPServerConfig(
+        server_id="vault",
+        name="Vault MCP",
+        url="https://mcp.example.com/api",
+        use_oauth=True,
+    )
+
+    assert config.to_dict()["use_oauth"] is True
+    assert MCPServerConfig.from_dict(config.to_dict()) == config
+
+
+async def test_oauth_storage_round_trips_tokens_and_client_registration():
+    """OAuth persistence retains refresh and dynamic registration state."""
+    storage = MCPOAuthStorage(
+        tokens=OAuthToken(
+            access_token="access-token",
+            refresh_token="refresh-token",
+        ),
+        client_info=OAuthClientInformationFull(
+            client_id="client-id",
+            redirect_uris=[AnyUrl("https://ha.example.com/oauth/callback")],
+        ),
+        redirect_uri="https://ha.example.com/oauth/callback",
+    )
+
+    restored = MCPOAuthStorage.from_dict(storage.to_dict())
+
+    assert restored.is_authenticated
+    assert (await restored.get_tokens()).refresh_token == "refresh-token"
+    assert (await restored.get_client_info()).client_id == "client-id"
+    assert restored.redirect_uri == "https://ha.example.com/oauth/callback"
 
 
 def test_service_config_round_trips_complete_permanent_catalogue():
@@ -198,6 +237,7 @@ def test_server_config_rejects_invalid_values(kwargs, field, code):
         "name": "Vault MCP",
         "url": "https://mcp.example.com/api",
         "headers": {},
+        "use_oauth": False,
         **kwargs,
     }
 
@@ -261,6 +301,7 @@ def test_config_flow_returns_framework_independent_initial_values():
         "server_id": "mcp_server_2",
         "description": "",
         "headers": {},
+        "use_oauth": False,
     }
 
 
