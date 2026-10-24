@@ -35,6 +35,11 @@
           "description": "Optional model-visible description of the server's purpose.",
           "headers": "Optional HTTP headers, including static Authorization headers."
         }
+      },
+      "mcp_discover": {
+        "title": "Discover MCP tools",
+        "description": "Select Discover Tools to request available tools from the server",
+        "submit": "Discover Tools"
       }
     },
     "error": {

@@ -45,10 +45,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     await async_setup_services(hass, config)
     return True
 
-
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ExtendedOpenAIConfigEntry
-) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: ExtendedOpenAIConfigEntry) -> bool:
     """Set up OpenAI Conversation from a config entry."""
 
     if get_service_type(entry) == SERVICE_TYPE_MCP:
@@ -86,9 +83,7 @@ async def async_setup_entry(
     return True
 
 
-async def async_unload_entry(
-    hass: HomeAssistant, entry: ExtendedOpenAIConfigEntry
-) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: ExtendedOpenAIConfigEntry) -> bool:
     """Unload OpenAI."""
     if get_service_type(entry) == SERVICE_TYPE_MCP:
         await cast(MCPClient, entry.runtime_data).aclose()

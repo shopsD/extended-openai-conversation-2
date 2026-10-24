@@ -88,9 +88,10 @@ async def test_user_step_routes_to_mcp(hass):
     flow.async_step_mcp.assert_awaited_once_with()
 
 
-async def test_mcp_step_creates_typed_service(hass):
-    """A valid MCP form creates an MCP service without agent subentries."""
+async def test_mcp_step_keeps_config_and_opens_discovery(hass):
+    """A valid MCP form successfully moves to tool discovery and keeps previous flow data."""
     flow = _config_flow(hass)
+    flow.async_step_mcp_discover = AsyncMock(return_value={"step_id": "mcp_discover"})
     flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
     user_input = {
         "name": "Vault MCP",
@@ -101,14 +102,10 @@ async def test_mcp_step_creates_typed_service(hass):
     }
 
     await flow.async_step_mcp(user_input)
-
-    call = flow.async_create_entry.call_args.kwargs
-    assert call["title"] == "Vault MCP"
-    assert call["data"][CONF_SERVICE_TYPE] == SERVICE_TYPE_MCP
-    assert call["data"][CONF_MCP_SERVER_ID] == "vault"
-    assert call["data"][CONF_MCP_DESCRIPTION] == "Secure storage tools"
-    assert "subentries" not in call
-
+    assert flow._mcp_config is not None
+    assert flow._mcp_config.server_id == "vault"
+    assert flow._mcp_config.url == "https://mcp.example.com/api"
+    flow.async_step_mcp_discover.assert_awaited_once_with()
 
 async def test_mcp_step_rejects_duplicate_server_id(hass):
     """MCP server IDs must be unique across centrally configured services."""

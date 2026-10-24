@@ -92,7 +92,7 @@ from .const import (
     SERVICE_TYPES,
 )
 from .helpers import get_authenticated_client, get_model_config, get_service_type
-from .mcp_client import MCPClientConfigFlow
+from .mcp_client import MCPClientConfigFlow, MCPClientConfigFlowResult, MCPServerConfig
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -191,6 +191,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenAI Conversation."""
 
     VERSION = 2
+    _mcp_config: MCPServerConfig | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -250,19 +251,14 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_mcp(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_mcp( self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Configure an MCP service."""
-        result = MCPClientConfigFlow(self._mcp_server_ids()).process(user_input)
+        result: MCPClientConfigFlowResult = (
+            MCPClientConfigFlow(self._mcp_server_ids()).process(user_input))
 
         if result.config is not None:
-            config_data = result.config.to_dict()
-            title = config_data.pop("name")
-            return self.async_create_entry(
-                title=title,
-                data={CONF_SERVICE_TYPE: SERVICE_TYPE_MCP, **config_data},
-            )
+            self._mcp_config = result.config
+            return await self.async_step_mcp_discover()
 
         schema = vol.Schema(
             {
@@ -293,14 +289,21 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=result.errors,
         )
 
-    def _mcp_server_ids(self) -> set[str]:
-        """Return the MCP server IDs reserved by Home Assistant entries."""
-        return {
-            entry.data[CONF_MCP_SERVER_ID]
-            for entry in self.hass.config_entries.async_entries(DOMAIN)
-            if get_service_type(entry) == SERVICE_TYPE_MCP
-            and CONF_MCP_SERVER_ID in entry.data
-        }
+    async def async_step_mcp_discover(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask the user whether to discover the server's tools."""
+        if self._mcp_config is None:
+            return self.async_abort(reason="invalid_mcp_flow_state")
+
+        if user_input is not None:
+            # The actual MCPClient.discover() call belongs here in the next step.
+            pass
+
+        return self.async_show_form(
+            step_id="mcp_discover",
+            data_schema=vol.Schema({}),
+        )
 
     @classmethod
     @callback
@@ -315,6 +318,14 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             "ai_task_data": ExtendedOpenAIAITaskSubentryFlowHandler,
         }
 
+    def _mcp_server_ids(self) -> set[str]:
+        """Return the MCP server IDs reserved by Home Assistant entries."""
+        return {
+            entry.data[CONF_MCP_SERVER_ID]
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+            if get_service_type(entry) == SERVICE_TYPE_MCP
+            and CONF_MCP_SERVER_ID in entry.data
+        }
 
 class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
     """Flow for managing OpenAI subentries."""
