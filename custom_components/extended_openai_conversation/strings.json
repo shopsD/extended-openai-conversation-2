@@ -36,10 +36,26 @@
           "headers": "Optional HTTP headers, including static Authorization headers."
         }
       },
-      "mcp_discover": {
+      "mcp_ask_discovery": {
+        "title": "MCP tool discovery",
+        "description": "Choose whether to retrieve the tools currently advertised by the MCP server.",
+        "menu_options": {
+          "mcp_perform_discovery": "Discover tools",
+          "mcp_skip_discovery": "Skip discovery"
+        }
+      },
+      "mcp_perform_discovery": {
         "title": "Discover MCP tools",
-        "description": "Select Discover Tools to request available tools from the server",
+        "description": "Connect to the MCP server and retrieve its advertised tools.",
         "submit": "Discover Tools"
+      },
+      "mcp_tools": {
+        "title": "Discovered MCP tools",
+        "description": "Connected to {server_name} and discovered {tool_count} tools."
+      },
+      "mcp_options": {
+        "title": "Configure MCP tool access",
+        "description": "Configure how this MCP service exposes tools to conversation agents."
       }
     },
     "error": {
@@ -50,7 +66,8 @@
       "invalid_name": "Enter a name for the MCP service.",
       "invalid_server_id": "Use lowercase letters, numbers, underscores, or hyphens; the ID must start with a letter or number.",
       "invalid_url": "Enter a valid HTTP or HTTPS URL.",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
+      "unknown": "[%key:common::config_flow::error::unknown%]",
+      "mcp_tool_discovery_failed": "Unable to retrieve tools from the MCP server."
     }
   },
   "config_subentries": {

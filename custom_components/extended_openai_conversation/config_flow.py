@@ -264,7 +264,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if result.config is not None:
             self._mcp_config = result.config
-            return await self.async_step_mcp_discover()
+            return await self.async_step_mcp_ask_discovery()
 
         schema = vol.Schema(
             {
@@ -295,29 +295,59 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=result.errors,
         )
 
-    async def async_step_mcp_discover(
+    async def async_step_mcp_ask_discovery(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose whether to discover the server's tools."""
+        if self._mcp_config is None:
+            return self.async_abort(reason="mcp_invalid_flow_state")
+
+        return self.async_show_menu(
+            step_id="mcp_ask_discovery",
+            menu_options=["mcp_perform_discovery", "mcp_skip_discovery"],
+        )
+
+    async def async_step_mcp_perform_discovery(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Ask the user whether to discover the server's tools."""
         if self._mcp_config is None:
-            return self.async_abort(reason="invalid_mcp_flow_state")
+            return self.async_abort(reason="mcp_invalid_flow_state")
+
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             processor: MCPClientConfigFlow = MCPClientConfigFlow(self._mcp_server_ids())
-            self._mcp_discovery = await processor.discover(self._mcp_config)
-            return await self.async_step_mcp_tools()
+            try:
+                self._mcp_discovery = await processor.discover(self._mcp_config)
+            except Exception:
+                _LOGGER.exception("Unexpected error during MCP tool discovery")
+                errors["base"] = "mcp_tool_discovery_failed"
+            else:
+                return await self.async_step_mcp_tools()
 
         return self.async_show_form(
-            step_id="mcp_discover",
+            step_id="mcp_perform_discovery",
             data_schema=vol.Schema({}),
+            errors=errors,
         )
+
+    async def async_step_mcp_skip_discovery(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Continue setup without discovering tools."""
+        if self._mcp_config is None:
+            return self.async_abort(reason="mcp_invalid_flow_state")
+
+        self._mcp_discovery = None
+        return await self.async_step_mcp_options()
 
     async def async_step_mcp_tools(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Display the successfully discovered MCP catalogue."""
         if self._mcp_discovery is None:
-            return self.async_abort(reason="invalid_mcp_flow_state")
+            return self.async_abort(reason="mcp_invalid_flow_state")
 
         return self.async_show_form(
             step_id="mcp_tools",
