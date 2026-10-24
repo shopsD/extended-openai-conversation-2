@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from openai import OpenAIError
 import yaml
@@ -18,7 +18,6 @@ from homeassistant.components.conversation import (
     ConversationResult,
     async_get_chat_log,
 )
-from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import intent, llm, template
@@ -73,9 +72,9 @@ class ExtendedOpenAIAgentEntity(
     skill_manager: SkillManager
 
     @property
-    def supported_languages(self) -> list[str] | Literal["*"]:
+    def supported_languages(self) -> list[str]:
         """Return a list of supported languages."""
-        return MATCH_ALL
+        return ["*"]
 
     @property
     def skills(self) -> list[str]:

@@ -348,7 +348,7 @@ class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
     @property
     def _is_new(self) -> bool:
         """Return if this is a new subentry."""
-        return self.source == "user"
+        return bool(self.source == "user")
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -617,7 +617,7 @@ class ExtendedOpenAIAITaskSubentryFlowHandler(ConfigSubentryFlow):
     @property
     def _is_new(self) -> bool:
         """Return if this is a new subentry."""
-        return self.source == "user"
+        return bool(self.source == "user")
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None

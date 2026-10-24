@@ -40,7 +40,8 @@ AZURE_DOMAIN_PATTERN = r"\.(openai\.azure\.com|azure-api\.net|services\.ai\.azur
 
 def get_service_type(entry: ConfigEntry) -> str:
     """Return an entry's service type, defaulting legacy entries to AI."""
-    return entry.data.get(CONF_SERVICE_TYPE, DEFAULT_SERVICE_TYPE)
+    service_type: str = entry.data.get(CONF_SERVICE_TYPE, DEFAULT_SERVICE_TYPE)
+    return service_type if isinstance(service_type, str) else DEFAULT_SERVICE_TYPE
 
 
 def get_model_config(model: str, base_url: str | None = None) -> dict[str, bool]:

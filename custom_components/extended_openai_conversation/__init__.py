@@ -94,7 +94,7 @@ async def async_unload_entry(
         await cast(MCPClient, entry.runtime_data).aclose()
         return True
     await async_unload_templates(hass)
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    return bool(await hass.config_entries.async_unload_platforms(entry, PLATFORMS))
 
 
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
