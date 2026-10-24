@@ -2,7 +2,13 @@
 
 from .config import MCPServerConfig
 from .mcp_client import MCPClient
-from .mcp_datatypes import MCPDiscoveryResult, MCPServerInformation, MCPTool, MCPToolResult,
+from .mcp_client_config_flow import MCPClientConfigFlow, MCPClientConfigFlowResult
+from .mcp_datatypes import (
+    MCPDiscoveryResult,
+    MCPServerInformation,
+    MCPTool,
+    MCPToolResult,
+)
 from .mcp_errors import (
     MCPClientClosedError,
     MCPClientError,
@@ -14,11 +20,13 @@ from .mcp_utils import MCPUtils
 __all__ = [
     "MCPClient",
     "MCPClientClosedError",
+    "MCPClientConfigFlow",
+    "MCPClientConfigFlowResult",
     "MCPClientError",
     "MCPConfigError",
+    "MCPDiscoveryResult",
     "MCPProtocolError",
     "MCPServerConfig",
-    "MCPDiscoveryResult",
     "MCPServerInformation",
     "MCPTool",
     "MCPToolResult",

@@ -90,7 +90,7 @@ from .const import (
     SERVICE_TYPES,
 )
 from .helpers import get_authenticated_client, get_model_config, get_service_type
-from .mcp_client import MCPConfigError, MCPServerConfig, MCPUtils
+from .mcp_client import MCPClientConfigFlow
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -252,77 +252,53 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Configure an MCP service."""
-        errors: dict[str, str] = {}
+        result = MCPClientConfigFlow(self._mcp_server_ids()).process(user_input)
 
-        if user_input is not None:
-            try:
-                config = MCPServerConfig(
-                    server_id=user_input[CONF_MCP_SERVER_ID],
-                    name=user_input[CONF_NAME],
-                    url=user_input[CONF_MCP_SERVER_URL],
-                    description=user_input.get(CONF_MCP_DESCRIPTION, ""),
-                    headers=user_input.get(CONF_MCP_HEADERS, {}),
-                )
-            except MCPConfigError as err:
-                error_field = {
-                    "server_id": CONF_MCP_SERVER_ID,
-                    "name": CONF_NAME,
-                    "url": CONF_MCP_SERVER_URL,
-                    "headers": CONF_MCP_HEADERS,
-                }[err.field]
-                errors[error_field] = err.code
-            else:
-                if self._mcp_server_id_exists(config.server_id):
-                    errors[CONF_MCP_SERVER_ID] = "duplicate_server_id"
-                else:
-                    config_data = config.to_dict()
-                    title = config_data.pop("name")
-                    return self.async_create_entry(
-                        title=title,
-                        data={
-                            CONF_SERVICE_TYPE: SERVICE_TYPE_MCP,
-                            **config_data,
-                        },
-                    )
+        if result.config is not None:
+            config_data = result.config.to_dict()
+            title = config_data.pop("name")
+            return self.async_create_entry(
+                title=title,
+                data={CONF_SERVICE_TYPE: SERVICE_TYPE_MCP, **config_data},
+            )
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_NAME, default="MCP Server"): str,
+                vol.Required(
+                    CONF_NAME,
+                    default=result.values[CONF_NAME],
+                ): str,
                 vol.Required(
                     CONF_MCP_SERVER_ID,
-                    default=self._generate_mcp_server_id(),
+                    default=result.values[CONF_MCP_SERVER_ID],
                 ): str,
-                vol.Optional(CONF_MCP_DESCRIPTION, default=""): str,
+                vol.Optional(
+                    CONF_MCP_DESCRIPTION,
+                    default=result.values.get(CONF_MCP_DESCRIPTION, ""),
+                ): str,
                 vol.Required(CONF_MCP_SERVER_URL): str,
-                vol.Optional(CONF_MCP_HEADERS, default={}): ObjectSelector(),
+                vol.Optional(
+                    CONF_MCP_HEADERS,
+                    default=result.values.get(CONF_MCP_HEADERS, {}),
+                ): ObjectSelector(),
             }
         )
-        if user_input is not None:
-            schema = self.add_suggested_values_to_schema(schema, user_input)
+        schema = self.add_suggested_values_to_schema(schema, result.values)
 
         return self.async_show_form(
             step_id="mcp",
             data_schema=schema,
-            errors=errors,
+            errors=result.errors,
         )
 
-    def _mcp_server_id_exists(self, server_id: str) -> bool:
-        """Return whether an MCP service already uses the server ID."""
-        return any(
-            get_service_type(entry) == SERVICE_TYPE_MCP
-            and entry.data.get(CONF_MCP_SERVER_ID) == server_id
-            for entry in self.hass.config_entries.async_entries(DOMAIN)
-        )
-
-    def _generate_mcp_server_id(self) -> str:
-        """Generate a short, readable, unique MCP server ID."""
-        existing_ids = {
+    def _mcp_server_ids(self) -> set[str]:
+        """Return the MCP server IDs reserved by Home Assistant entries."""
+        return {
             entry.data[CONF_MCP_SERVER_ID]
             for entry in self.hass.config_entries.async_entries(DOMAIN)
             if get_service_type(entry) == SERVICE_TYPE_MCP
             and CONF_MCP_SERVER_ID in entry.data
         }
-        return MCPUtils.generate_server_id(existing_ids)
 
     @classmethod
     @callback

@@ -14,7 +14,12 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, InitializeResult, ListToolsResult, Tool
 
 from .config import MCPServerConfig
-from .mcp_datatypes import MCPServerInformation, MCPTool, MCPToolResult
+from .mcp_datatypes import (
+    MCPDiscoveryResult,
+    MCPServerInformation,
+    MCPTool,
+    MCPToolResult,
+)
 from .mcp_errors import MCPClientClosedError, MCPProtocolError
 
 DEFAULT_CONNECT_TIMEOUT = 30.0
@@ -132,26 +137,23 @@ class MCPClient:
             is_error=result.isError,
         )
 
-    async def _list_tools(self, session: ClientSession) -> tuple[MCPTool, ...]:
+    async def _list_session_tools(self, session: ClientSession) -> tuple[MCPTool, ...]:
         """Return the complete advertised tool catalogue across all SDK pages."""
-        async with self._operation_lock:
-            self._ensure_open()
-            async with self._session() as (session, _):
-                tools: list[MCPTool] = []
-                cursor: str | None = None
-                seen_cursors: set[str] = set()
-                while True:
-                    result: ListToolsResult = await session.list_tools(cursor=cursor)
-                    tools.extend(self._tool_definition(tool) for tool in result.tools)
+        tools: list[MCPTool] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            result: ListToolsResult = await session.list_tools(cursor=cursor)
+            tools.extend(self._tool_definition(tool) for tool in result.tools)
 
-                    next_cursor: str | None = result.nextCursor
-                    if next_cursor is None:
-                        return tuple(tools)
-                    if next_cursor in seen_cursors:
-                        raise MCPProtocolError("MCP server repeated a tools/list pagination cursor")
+            next_cursor: str | None = result.nextCursor
+            if next_cursor is None:
+                return tuple(tools)
+            if next_cursor in seen_cursors:
+                raise MCPProtocolError("MCP server repeated a tools/list pagination cursor")
 
-                    seen_cursors.add(next_cursor)
-                    cursor = next_cursor
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
 
     async def discover(self) -> MCPDiscoveryResult:
         """Initialize once and return server metadata and its complete catalogue."""
