@@ -103,11 +103,9 @@ from .mcp_client import (
     MCPClientConfigFlow,
     MCPClientConfigFlowResult,
     MCPConfigError,
+    MCPConfigFlowTempData,
     MCPContextEstimate,
-    MCPDiscoveryResult,
-    MCPServerConfig,
     MCPServiceConfig,
-    estimate_permanent_context,
 )
 from .skills import SkillManager
 
@@ -207,10 +205,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenAI Conversation."""
 
     VERSION = 2
-    _mcp_config: MCPServerConfig | None = None
-    _mcp_discovery: MCPDiscoveryResult | None = None
-    _mcp_options: dict[str, Any] | None = None
-    _mcp_service_config: MCPServiceConfig | None = None
+    _mcp_config_tmp: MCPConfigFlowTempData = MCPConfigFlowTempData()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -276,7 +271,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             MCPClientConfigFlow(self._mcp_server_ids()).process(user_input))
 
         if result.config is not None:
-            self._mcp_config = result.config
+            self._mcp_config_tmp.mcp_config = result.config
             return await self.async_step_mcp_ask_discovery()
 
         schema = vol.Schema(
@@ -312,7 +307,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose whether to discover the server's tools."""
-        if self._mcp_config is None:
+        if self._mcp_config_tmp.mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
         return self.async_show_menu(
@@ -324,13 +319,13 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Discover the server's tools after the user explicitly requests it."""
-        if self._mcp_config is None:
+        if self._mcp_config_tmp.mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
         errors: dict[str, str] = {}
         processor = MCPClientConfigFlow(self._mcp_server_ids())
         try:
-            self._mcp_discovery = await processor.discover(self._mcp_config)
+            self._mcp_config_tmp.mcp_discovery = await processor.discover(self._mcp_config_tmp.mcp_config)
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected error during MCP tool discovery")
             errors["base"] = "mcp_tool_discovery_failed"
@@ -347,17 +342,17 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Continue setup without discovering tools."""
-        if self._mcp_config is None:
+        if self._mcp_config_tmp.mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
-        self._mcp_discovery = None
+        self._mcp_config_tmp.mcp_discovery = None
         return await self.async_step_mcp_options()
 
     async def async_step_mcp_tools(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Configure tool exposure from the discovered MCP catalogue."""
-        if self._mcp_discovery is None:
+        if self._mcp_config_tmp.mcp_discovery is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
         errors: dict[str, str] = {}
@@ -374,10 +369,10 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             if not errors:
                 return await self.async_step_mcp_review()
 
-        values = self._mcp_options or {}
+        values = self._mcp_config_tmp.mcp_options or {}
         tool_options = [
             SelectOptionDict(value=tool.name, label=tool.title or tool.name)
-            for tool in self._mcp_discovery.tools
+            for tool in self._mcp_config_tmp.mcp_discovery.tools
         ]
         schema = vol.Schema(
             {
@@ -428,8 +423,8 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="mcp_tools",
             data_schema=schema,
             description_placeholders={
-                "server_name": self._mcp_discovery.server.name,
-                "tool_count": str(len(self._mcp_discovery.tools)),
+                "server_name": self._mcp_config_tmp.mcp_discovery.server.name,
+                "tool_count": str(len(self._mcp_config_tmp.mcp_discovery.tools)),
             },
             errors=errors,
         )
@@ -438,7 +433,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Configure MCP policies when initial tool discovery was skipped."""
-        if self._mcp_config is None:
+        if self._mcp_config_tmp.mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
         errors: dict[str, str] = {}
@@ -453,7 +448,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             if not errors:
                 return await self.async_step_mcp_review()
 
-        values = self._mcp_options or {}
+        values = self._mcp_config_tmp.mcp_options or {}
         return self.async_show_form(
             step_id="mcp_options",
             data_schema=vol.Schema(
@@ -481,13 +476,13 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def _set_mcp_service_config(self, options: dict[str, Any]) -> dict[str, str]:
         """Validate MCP policies and retain their normalized service config."""
-        if self._mcp_config is None:
+        if self._mcp_config_tmp.mcp_config is None:
             return {"base": "mcp_invalid_flow_state"}
 
         try:
             service_config = MCPServiceConfig.from_selection(
-                self._mcp_config,
-                self._mcp_discovery,
+                self._mcp_config_tmp.mcp_config,
+                self._mcp_config_tmp.mcp_discovery,
                 permanent_tool_exposure=options[
                     CONF_MCP_PERMANENT_TOOL_EXPOSURE
                 ],
@@ -499,12 +494,12 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 regex_timeout=options[CONF_MCP_REGEX_TIMEOUT],
             )
         except MCPConfigError as err:
-            self._mcp_options = options
-            self._mcp_service_config = None
+            self._mcp_config_tmp.mcp_options = options
+            self._mcp_config_tmp.mcp_service_config = None
             return {err.field: err.code}
 
-        self._mcp_service_config = service_config
-        self._mcp_options = {
+        self._mcp_config_tmp.mcp_service_config = service_config
+        self._mcp_config_tmp.mcp_options = {
             CONF_MCP_PERMANENT_TOOL_EXPOSURE: service_config.permanent_tool_exposure,
             CONF_MCP_PERMANENT_TOOLS: [
                 tool.name for tool in service_config.permanent_tools
@@ -521,23 +516,23 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Review MCP policy and estimated permanent context size."""
-        if self._mcp_config is None or self._mcp_options is None:
+        if self._mcp_config_tmp.mcp_config is None or self._mcp_config_tmp.mcp_options is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
-        selected_names = set(self._mcp_options[CONF_MCP_PERMANENT_TOOLS])
+        selected_names = set(self._mcp_config_tmp.mcp_options[CONF_MCP_PERMANENT_TOOLS])
         selected_tools = (
             tuple(
                 tool
-                for tool in (self._mcp_discovery.tools if self._mcp_discovery else ())
+                for tool in (self._mcp_config_tmp.mcp_discovery.tools if self._mcp_config_tmp.mcp_discovery else ())
                 if tool.name in selected_names
             )
-            if self._mcp_options[CONF_MCP_PERMANENT_TOOL_EXPOSURE]
+            if self._mcp_config_tmp.mcp_options[CONF_MCP_PERMANENT_TOOL_EXPOSURE]
             else ()
         )
-        estimate: MCPContextEstimate = estimate_permanent_context(
-            self._mcp_config,
+        estimate: MCPContextEstimate = MCPContextEstimate.estimate_permanent_context(
+            self._mcp_config_tmp.mcp_config,
             selected_tools,
-            include_schemas=self._mcp_options[
+            include_schemas=self._mcp_config_tmp.mcp_options[
                 CONF_MCP_INCLUDE_PERMANENT_SCHEMAS
             ],
         )
@@ -548,22 +543,22 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "permanent_exposure": (
                     "Yes"
-                    if self._mcp_options[CONF_MCP_PERMANENT_TOOL_EXPOSURE]
+                    if self._mcp_config_tmp.mcp_options[CONF_MCP_PERMANENT_TOOL_EXPOSURE]
                     else "No"
                 ),
                 "selected_tool_count": str(estimate.selected_tool_count),
                 "schemas_included": (
                     "Yes"
-                    if self._mcp_options[CONF_MCP_INCLUDE_PERMANENT_SCHEMAS]
+                    if self._mcp_config_tmp.mcp_options[CONF_MCP_INCLUDE_PERMANENT_SCHEMAS]
                     and estimate.selected_tool_count
                     else "No"
                 ),
                 "on_demand_discovery": (
                     "Yes"
-                    if self._mcp_options[CONF_MCP_ON_DEMAND_DISCOVERY]
+                    if self._mcp_config_tmp.mcp_options[CONF_MCP_ON_DEMAND_DISCOVERY]
                     else "No"
                 ),
-                "regex_timeout": str(self._mcp_options[CONF_MCP_REGEX_TIMEOUT]),
+                "regex_timeout": str(self._mcp_config_tmp.mcp_options[CONF_MCP_REGEX_TIMEOUT]),
                 "character_count": f"{estimate.character_count:,}",
                 "byte_count": f"{estimate.byte_count:,}",
                 "estimated_tokens": f"{estimate.estimated_tokens:,}",

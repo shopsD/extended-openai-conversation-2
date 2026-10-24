@@ -2,7 +2,11 @@
 
 from .config import MCPServerConfig
 from .mcp_client import MCPClient
-from .mcp_client_config_flow import MCPClientConfigFlow, MCPClientConfigFlowResult
+from .mcp_client_config_flow import (
+    MCPClientConfigFlow,
+    MCPClientConfigFlowResult,
+    MCPConfigFlowTempData,
+)
 from .mcp_const import (
     CONF_MCP_CATALOGUE_ID,
     CONF_MCP_DESCRIPTION,
@@ -21,7 +25,7 @@ from .mcp_const import (
     DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
     DEFAULT_MCP_REGEX_TIMEOUT,
 )
-from .mcp_context import MCPContextEstimate, estimate_permanent_context
+from .mcp_context import MCPContextEstimate
 from .mcp_datatypes import (
     MCPDiscoveryResult,
     MCPServerInformation,
@@ -60,6 +64,7 @@ __all__ = [
     "MCPClientConfigFlowResult",
     "MCPClientError",
     "MCPConfigError",
+    "MCPConfigFlowTempData",
     "MCPContextEstimate",
     "MCPDiscoveryResult",
     "MCPProtocolError",
@@ -69,5 +74,4 @@ __all__ = [
     "MCPTool",
     "MCPToolResult",
     "MCPUtils",
-    "estimate_permanent_context",
 ]
