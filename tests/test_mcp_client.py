@@ -6,6 +6,8 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPClientConfigFlow,
     MCPConfigError,
     MCPServerConfig,
+    MCPServerInformation,
+    MCPServiceConfig,
     MCPTool,
     MCPUtils,
     estimate_permanent_context,
@@ -30,6 +32,51 @@ def test_server_config_normalises_and_serialises_values():
         "headers": {"Authorization": "Bearer token"},
     }
     assert MCPServerConfig.from_dict(config.to_dict()) == config
+
+
+def test_service_config_round_trips_complete_permanent_catalogue():
+    """Persisted service data retains policies and complete tool snapshots."""
+    tool = MCPTool(
+        name="read_secret",
+        title="Read secret",
+        description="Read a stored secret.",
+        input_schema={
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+        },
+        output_schema={"type": "object"},
+        definition={"name": "read_secret", "inputSchema": {"type": "object"}},
+    )
+    config = MCPServiceConfig(
+        server=MCPServerConfig(
+            server_id="vault",
+            name="Vault MCP",
+            url="https://mcp.example.com/api",
+            description="Storage tools",
+            headers={"Authorization": "Bearer token"},
+        ),
+        permanent_tool_exposure=True,
+        permanent_tools=(tool,),
+        include_permanent_schemas=False,
+        on_demand_discovery=True,
+        regex_timeout=0.2,
+        server_information=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions="Server instructions",
+            capabilities={"tools": {"listChanged": True}},
+        ),
+    )
+
+    persisted = config.to_dict()
+
+    assert persisted["permanent_tools"] == ["read_secret"]
+    assert persisted["permanent_tool_catalogue"] == [tool.to_dict()]
+    assert persisted["permanent_tool_catalogue"][0]["input_schema"] == (
+        tool.input_schema
+    )
+    assert MCPServiceConfig.from_dict(persisted) == config
 
 
 @pytest.mark.parametrize(

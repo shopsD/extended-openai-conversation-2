@@ -17,6 +17,7 @@ from .mcp_errors import (
     MCPProtocolError,
 )
 from .mcp_utils import MCPUtils
+from .service_config import MCPServiceConfig
 
 __all__ = [
     "MCPClient",
@@ -30,6 +31,7 @@ __all__ = [
     "MCPProtocolError",
     "MCPServerConfig",
     "MCPServerInformation",
+    "MCPServiceConfig",
     "MCPTool",
     "MCPToolResult",
     "MCPUtils",
