@@ -1,3 +1,4 @@
+"""Constants related to the MCP Client API"""
 
 CONF_MCP_SERVER_ID = "server_id"
 CONF_MCP_SERVER_URL = "url"

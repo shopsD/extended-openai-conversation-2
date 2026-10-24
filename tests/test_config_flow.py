@@ -35,6 +35,12 @@ from custom_components.extended_openai_conversation.const import (
     SERVICE_TYPE_AI_ENDPOINT,
     SERVICE_TYPE_MCP,
 )
+from custom_components.extended_openai_conversation.mcp_client import (
+    MCPDiscoveryResult,
+    MCPServerConfig,
+    MCPServerInformation,
+    MCPTool,
+)
 from homeassistant.const import CONF_API_KEY
 from homeassistant.exceptions import HomeAssistantError
 
@@ -107,6 +113,74 @@ async def test_mcp_step_keeps_config_and_opens_discovery(hass):
     assert flow._mcp_config.url == "https://mcp.example.com/api"
     flow.async_step_mcp_discover.assert_awaited_once_with()
 
+
+async def test_mcp_discover_step_does_not_connect_until_submitted(hass):
+    """Displaying the discovery confirmation does not contact the MCP server."""
+    flow = _config_flow(hass)
+    flow._mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+    )
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "MCPClientConfigFlow.discover",
+        new=AsyncMock(),
+    ) as mock_discover:
+        result = await flow.async_step_mcp_discover()
+
+    assert result == {"type": "form"}
+    mock_discover.assert_not_awaited()
+    assert flow.async_show_form.call_args.kwargs["step_id"] == "mcp_discover"
+
+
+async def test_mcp_discover_step_keeps_catalogue_and_opens_tools(hass):
+    """Submitting discovery retrieves the catalogue once and opens tool setup."""
+    flow = _config_flow(hass)
+    config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+    )
+    discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(
+            MCPTool(
+                name="read_secret",
+                title="Read secret",
+                description="Read a stored secret.",
+                input_schema={"type": "object"},
+                output_schema=None,
+                definition={"name": "read_secret"},
+            ),
+        ),
+    )
+    flow._mcp_config = config
+    flow.async_step_mcp_tools = AsyncMock(return_value={"step_id": "mcp_tools"})
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "MCPClientConfigFlow.discover",
+        new=AsyncMock(return_value=discovery),
+    ) as mock_discover:
+        result = await flow.async_step_mcp_discover({})
+
+    assert result == {"step_id": "mcp_tools"}
+    mock_discover.assert_awaited_once_with(config)
+    assert flow._mcp_discovery is discovery
+    flow.async_step_mcp_tools.assert_awaited_once_with()
+    flow.async_create_entry.assert_not_called()
+
+
 async def test_mcp_step_rejects_duplicate_server_id(hass):
     """MCP server IDs must be unique across centrally configured services."""
     flow = _config_flow(hass)
@@ -144,7 +218,7 @@ def test_mcp_services_do_not_support_agent_subentries():
 
 
 def test_legacy_services_still_support_agent_subentries():
-    """Entries without a type retain the legacy AI endpoint behavior."""
+    """Entries without a type maintain the legacy AI endpoint behavior."""
     entry = MagicMock()
     entry.data = {}
 

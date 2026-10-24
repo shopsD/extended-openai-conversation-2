@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import MCPServerConfig
+from .mcp_client import MCPClient
+from .mcp_datatypes import MCPDiscoveryResult
 from .mcp_errors import MCPConfigError
 from .mcp_utils import MCPUtils
 
@@ -82,3 +84,9 @@ class MCPClientConfigFlow:
             errors={},
             config=config,
         )
+
+    async def discover(self, config: MCPServerConfig) -> MCPDiscoveryResult:
+        """Retrieve the server and tools catalogue."""
+        async with MCPClient(config) as client:
+            return await client.discover()
+

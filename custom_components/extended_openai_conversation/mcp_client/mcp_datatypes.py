@@ -34,6 +34,7 @@ class MCPToolResult:
     structured_content: dict[str, Any] | None
     is_error: bool
 
+
 @dataclass(frozen=True, slots=True)
 class MCPDiscoveryResult:
     """Server metadata and complete tool catalogue from one MCP session."""

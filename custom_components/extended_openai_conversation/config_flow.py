@@ -92,7 +92,12 @@ from .const import (
     SERVICE_TYPES,
 )
 from .helpers import get_authenticated_client, get_model_config, get_service_type
-from .mcp_client import MCPClientConfigFlow, MCPClientConfigFlowResult, MCPServerConfig
+from .mcp_client import (
+    MCPClientConfigFlow,
+    MCPClientConfigFlowResult,
+    MCPDiscoveryResult,
+    MCPServerConfig,
+)
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -192,6 +197,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 2
     _mcp_config: MCPServerConfig | None = None
+    _mcp_discovery: MCPDiscoveryResult | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -297,12 +303,29 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="invalid_mcp_flow_state")
 
         if user_input is not None:
-            # The actual MCPClient.discover() call belongs here in the next step.
-            pass
+            processor: MCPClientConfigFlow = MCPClientConfigFlow(self._mcp_server_ids())
+            self._mcp_discovery = await processor.discover(self._mcp_config)
+            return await self.async_step_mcp_tools()
 
         return self.async_show_form(
             step_id="mcp_discover",
             data_schema=vol.Schema({}),
+        )
+
+    async def async_step_mcp_tools(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Display the successfully discovered MCP catalogue."""
+        if self._mcp_discovery is None:
+            return self.async_abort(reason="invalid_mcp_flow_state")
+
+        return self.async_show_form(
+            step_id="mcp_tools",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "server_name": self._mcp_discovery.server.name,
+                "tool_count": str(len(self._mcp_discovery.tools)),
+            },
         )
 
     @classmethod
