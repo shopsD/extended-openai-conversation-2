@@ -369,7 +369,10 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
     @property
     def _client(self) -> AsyncClient:
         """Return the OpenAI client."""
-        return self.entry.runtime_data
+        client = self.entry.runtime_data
+        if not isinstance(client, AsyncClient):
+            raise TypeError("An OpenAI entity requires an OpenAI client")
+        return client
 
     async def _async_handle_chat_log(
         self,
