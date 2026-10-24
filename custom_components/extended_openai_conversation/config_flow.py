@@ -6,21 +6,6 @@ import logging
 import types
 from typing import Any
 
-from mcp_client.mcp_const import (
-    CONF_MCP_DESCRIPTION,
-    CONF_MCP_HEADERS,
-    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
-    CONF_MCP_ON_DEMAND_DISCOVERY,
-    CONF_MCP_PERMANENT_TOOL_EXPOSURE,
-    CONF_MCP_PERMANENT_TOOLS,
-    CONF_MCP_REGEX_TIMEOUT,
-    CONF_MCP_SERVER_ID,
-    CONF_MCP_SERVER_URL,
-    DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS,
-    DEFAULT_MCP_ON_DEMAND_DISCOVERY,
-    DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
-    DEFAULT_MCP_REGEX_TIMEOUT,
-)
 from openai._exceptions import APIConnectionError, AuthenticationError
 import probatio as vol
 import yaml
@@ -102,6 +87,19 @@ from .const import (
 )
 from .helpers import get_authenticated_client, get_model_config, get_service_type
 from .mcp_client import (
+    CONF_MCP_DESCRIPTION,
+    CONF_MCP_HEADERS,
+    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    CONF_MCP_ON_DEMAND_DISCOVERY,
+    CONF_MCP_PERMANENT_TOOL_EXPOSURE,
+    CONF_MCP_PERMANENT_TOOLS,
+    CONF_MCP_REGEX_TIMEOUT,
+    CONF_MCP_SERVER_ID,
+    CONF_MCP_SERVER_URL,
+    DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    DEFAULT_MCP_ON_DEMAND_DISCOVERY,
+    DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
+    DEFAULT_MCP_REGEX_TIMEOUT,
     MCPClientConfigFlow,
     MCPClientConfigFlowResult,
     MCPConfigError,

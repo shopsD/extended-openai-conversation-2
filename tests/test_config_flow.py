@@ -24,10 +24,6 @@ from custom_components.extended_openai_conversation.const import (
     CONF_BASE_URL,
     CONF_CHAT_MODEL,
     CONF_FUNCTION_TOOLS,
-    CONF_MCP_DESCRIPTION,
-    CONF_MCP_HEADERS,
-    CONF_MCP_SERVER_ID,
-    CONF_MCP_SERVER_URL,
     CONF_PROMPT,
     CONF_SERVICE_TYPE,
     CONF_SKILLS,
@@ -42,11 +38,15 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPTool,
 )
 from custom_components.extended_openai_conversation.mcp_client.mcp_const import (
+    CONF_MCP_DESCRIPTION,
+    CONF_MCP_HEADERS,
     CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
     CONF_MCP_ON_DEMAND_DISCOVERY,
     CONF_MCP_PERMANENT_TOOL_EXPOSURE,
     CONF_MCP_PERMANENT_TOOLS,
     CONF_MCP_REGEX_TIMEOUT,
+    CONF_MCP_SERVER_ID,
+    CONF_MCP_SERVER_URL,
 )
 from homeassistant.const import CONF_API_KEY
 from homeassistant.exceptions import HomeAssistantError

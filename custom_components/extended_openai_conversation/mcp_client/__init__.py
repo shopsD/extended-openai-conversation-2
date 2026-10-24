@@ -3,6 +3,24 @@
 from .config import MCPServerConfig
 from .mcp_client import MCPClient
 from .mcp_client_config_flow import MCPClientConfigFlow, MCPClientConfigFlowResult
+from .mcp_const import (
+    CONF_MCP_CATALOGUE_ID,
+    CONF_MCP_DESCRIPTION,
+    CONF_MCP_HEADERS,
+    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    CONF_MCP_ON_DEMAND_DISCOVERY,
+    CONF_MCP_PERMANENT_TOOL_CATALOGUE,
+    CONF_MCP_PERMANENT_TOOL_EXPOSURE,
+    CONF_MCP_PERMANENT_TOOLS,
+    CONF_MCP_REGEX_TIMEOUT,
+    CONF_MCP_SERVER_ID,
+    CONF_MCP_SERVER_INFORMATION,
+    CONF_MCP_SERVER_URL,
+    DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    DEFAULT_MCP_ON_DEMAND_DISCOVERY,
+    DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
+    DEFAULT_MCP_REGEX_TIMEOUT,
+)
 from .mcp_context import MCPContextEstimate, estimate_permanent_context
 from .mcp_datatypes import (
     MCPDiscoveryResult,
@@ -20,6 +38,22 @@ from .mcp_utils import MCPUtils
 from .service_config import MCPServiceConfig
 
 __all__ = [
+    "CONF_MCP_CATALOGUE_ID",
+    "CONF_MCP_DESCRIPTION",
+    "CONF_MCP_HEADERS",
+    "CONF_MCP_INCLUDE_PERMANENT_SCHEMAS",
+    "CONF_MCP_ON_DEMAND_DISCOVERY",
+    "CONF_MCP_PERMANENT_TOOLS",
+    "CONF_MCP_PERMANENT_TOOL_CATALOGUE",
+    "CONF_MCP_PERMANENT_TOOL_EXPOSURE",
+    "CONF_MCP_REGEX_TIMEOUT",
+    "CONF_MCP_SERVER_ID",
+    "CONF_MCP_SERVER_INFORMATION",
+    "CONF_MCP_SERVER_URL",
+    "DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS",
+    "DEFAULT_MCP_ON_DEMAND_DISCOVERY",
+    "DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE",
+    "DEFAULT_MCP_REGEX_TIMEOUT",
     "MCPClient",
     "MCPClientClosedError",
     "MCPClientConfigFlow",
