@@ -11,7 +11,6 @@ from .mcp_client import MCPClient
 from .mcp_datatypes import MCPDiscoveryResult
 from .mcp_errors import MCPConfigError
 from .mcp_utils import MCPUtils
-from .service_config import MCPServiceConfig
 
 DEFAULT_MCP_SERVER_NAME = "MCP Server"
 
@@ -20,15 +19,6 @@ _REQUIRED_TEXT_FIELDS = {
     "server_id": "invalid_server_id",
     "url": "invalid_url",
 }
-
-@dataclass(slots=True)
-class MCPConfigFlowTempData:
-    """Class used to store data only during the lifetime of the active Config Flow"""
-    mcp_config: MCPServerConfig | None = None
-    mcp_discovery: MCPDiscoveryResult | None = None
-    mcp_options: dict[str, Any] | None = None
-    mcp_service_config: MCPServiceConfig | None = None
-
 
 @dataclass(frozen=True, slots=True)
 class MCPClientConfigFlowResult:

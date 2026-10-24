@@ -103,8 +103,9 @@ from .mcp_client import (
     MCPClientConfigFlow,
     MCPClientConfigFlowResult,
     MCPConfigError,
-    MCPConfigFlowTempData,
     MCPContextEstimate,
+    MCPDiscoveryResult,
+    MCPServerConfig,
     MCPServiceConfig,
 )
 from .skills import SkillManager
@@ -205,10 +206,20 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenAI Conversation."""
 
     VERSION = 2
+
     def __init__(self) -> None:
         """Initialize the config flow."""
         super().__init__()
-        self._mcp_config_tmp: MCPConfigFlowTempData = MCPConfigFlowTempData()
+        self._mcp_config: MCPServerConfig | None = None
+        self._mcp_discovery: MCPDiscoveryResult | None = None
+        self._mcp_options: dict[str, Any] | None = None
+        self._mcp_service_config: MCPServiceConfig | None = None
+        self._selected_service_type: str | None = None
+        self._ai_endpoint_data: dict[str, Any] | None = None
+        self._draft_revision: int = 0
+        self._reviewed_revision: int | None = None
+        self._workflow_status: str = ""
+        self._reconfigure_entry: ConfigEntry | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -220,9 +231,60 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         if user_input[CONF_SERVICE_TYPE] == SERVICE_TYPE_MCP:
+            self._selected_service_type = SERVICE_TYPE_MCP
             return await self.async_step_mcp()
 
+        self._selected_service_type = SERVICE_TYPE_AI_ENDPOINT
         return await self.async_step_ai_endpoint()
+
+    async def async_step_service_menu(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the central service configuration workflow."""
+        if self._selected_service_type is None:
+            return await self.async_step_user()
+
+        options: list[str] = []
+        allow_type_switch = self._reconfigure_entry is None
+        if self._selected_service_type == SERVICE_TYPE_MCP:
+            if allow_type_switch:
+                options.append("switch_to_ai_endpoint")
+            options.append("mcp")
+            if self._mcp_config is not None:
+                options.extend(["mcp_perform_discovery", "mcp_skip_discovery"])
+        else:
+            if allow_type_switch:
+                options.append("switch_to_mcp")
+            options.append("ai_endpoint")
+
+        service_configuration = self._service_configuration()
+        if service_configuration is not None:
+            options.append("service_review")
+        if (
+            service_configuration is not None
+            and self._reviewed_revision == self._draft_revision
+        ):
+            options.append("service_save")
+
+        return self.async_show_menu(
+            step_id="service_menu",
+            menu_options=options,
+            description_placeholders={"status": self._workflow_status},
+        )
+
+    async def async_step_switch_to_ai_endpoint(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Switch this draft to an AI endpoint service."""
+        self._select_service_type(SERVICE_TYPE_AI_ENDPOINT)
+        return await self.async_step_ai_endpoint()
+
+    async def async_step_switch_to_mcp(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Switch this draft to an MCP service."""
+        self._select_service_type(SERVICE_TYPE_MCP)
+        return await self.async_step_mcp()
 
     async def async_step_ai_endpoint(
         self, user_input: dict[str, Any] | None = None
@@ -242,63 +304,66 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                user_input[CONF_SERVICE_TYPE] = SERVICE_TYPE_AI_ENDPOINT
-                return self.async_create_entry(
-                    title=user_input.get(CONF_NAME, DEFAULT_NAME),
-                    data=user_input,
-                    subentries=[
-                        {
-                            "subentry_type": "conversation",
-                            "data": dict(DEFAULT_OPTIONS),
-                            "title": DEFAULT_CONVERSATION_NAME,
-                            "unique_id": None,
-                        },
-                        {
-                            "subentry_type": "ai_task_data",
-                            "data": dict(DEFAULT_AI_TASK_OPTIONS),
-                            "title": DEFAULT_AI_TASK_NAME,
-                            "unique_id": None,
-                        },
-                    ],
-                )
+                data = {**user_input, CONF_SERVICE_TYPE: SERVICE_TYPE_AI_ENDPOINT}
+                if data != self._ai_endpoint_data:
+                    self._ai_endpoint_data = data
+                    self._mark_draft_changed()
+                self._workflow_status = "AI endpoint configuration is valid."
+                return await self.async_step_service_menu()
 
+        schema = self.add_suggested_values_to_schema(
+            STEP_AI_ENDPOINT_DATA_SCHEMA, self._ai_endpoint_data or {}
+        )
         return self.async_show_form(
             step_id="ai_endpoint",
-            data_schema=STEP_AI_ENDPOINT_DATA_SCHEMA,
+            data_schema=schema,
             errors=errors,
         )
 
-    async def async_step_mcp( self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_mcp(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Configure an MCP service."""
-        result: MCPClientConfigFlowResult = (
-            MCPClientConfigFlow(self._mcp_server_ids()).process(user_input))
+        result: MCPClientConfigFlowResult = MCPClientConfigFlow(
+            self._mcp_server_ids()
+        ).process(user_input)
 
         if result.config is not None:
-            self._mcp_config_tmp.mcp_config = result.config
-            return await self.async_step_mcp_ask_discovery()
+            if result.config != self._mcp_config:
+                self._mcp_discovery = None
+                self._mcp_options = None
+                self._mcp_service_config = None
+                self._mark_draft_changed()
+            self._mcp_config = result.config
+            self._workflow_status = "MCP server configuration is valid."
+            return await self.async_step_service_menu()
+
+        values = result.values
+        if user_input is None and self._mcp_config is not None:
+            values = self._mcp_config.to_dict()
 
         schema = vol.Schema(
             {
                 vol.Required(
                     CONF_NAME,
-                    default=result.values[CONF_NAME],
+                    default=values[CONF_NAME],
                 ): str,
                 vol.Required(
                     CONF_MCP_SERVER_ID,
-                    default=result.values[CONF_MCP_SERVER_ID],
+                    default=values[CONF_MCP_SERVER_ID],
                 ): str,
                 vol.Optional(
                     CONF_MCP_DESCRIPTION,
-                    default=result.values.get(CONF_MCP_DESCRIPTION, ""),
+                    default=values.get(CONF_MCP_DESCRIPTION, ""),
                 ): str,
                 vol.Required(CONF_MCP_SERVER_URL): str,
                 vol.Optional(
                     CONF_MCP_HEADERS,
-                    default=result.values.get(CONF_MCP_HEADERS, {}),
+                    default=values.get(CONF_MCP_HEADERS, {}),
                 ): ObjectSelector(),
             }
         )
-        schema = self.add_suggested_values_to_schema(schema, result.values)
+        schema = self.add_suggested_values_to_schema(schema, values)
 
         return self.async_show_form(
             step_id="mcp",
@@ -310,56 +375,68 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose whether to discover the server's tools."""
-        if self._mcp_config_tmp.mcp_config is None:
+        if self._mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
-        return self.async_show_menu(
-            step_id="mcp_ask_discovery",
-            menu_options=["mcp_perform_discovery", "mcp_skip_discovery"],
-        )
+        return await self.async_step_service_menu()
 
     async def async_step_mcp_perform_discovery(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Discover the server's tools after the user explicitly requests it."""
-        if self._mcp_config_tmp.mcp_config is None:
+        if self._mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
-        errors: dict[str, str] = {}
-        processor = MCPClientConfigFlow(self._mcp_server_ids())
+        processor: MCPClientConfigFlow = MCPClientConfigFlow(self._mcp_server_ids())
         try:
-            self._mcp_config_tmp.mcp_discovery = await processor.discover(self._mcp_config_tmp.mcp_config)
+            self._mcp_discovery = await processor.discover(
+                self._mcp_config
+            )
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected error during MCP tool discovery")
-            errors["base"] = "mcp_tool_discovery_failed"
+            self._workflow_status = "Unable to retrieve tools from the MCP server."
+            return await self.async_step_service_menu()
         else:
-            return await self.async_step_mcp_tools()
+            # restore the previous options
+            previous_options: dict[str, Any] | None = self._mcp_options
+            if previous_options is not None:
+                available_tools: set[str] = {
+                    tool.name for tool in self._mcp_discovery.tools
+                }
+                previous_options = {
+                    **previous_options,
+                    CONF_MCP_PERMANENT_TOOLS: [
+                        name
+                        for name in previous_options.get(CONF_MCP_PERMANENT_TOOLS, [])
+                        if name in available_tools
+                    ],
+                }
 
-        return self.async_show_form(
-            step_id="mcp_perform_discovery",
-            data_schema=vol.Schema({}),
-            errors=errors,
-        )
+            self._mcp_service_config = None
+            self._mcp_options = previous_options
+            self._mark_draft_changed()
+            return await self.async_step_mcp_tools()
 
     async def async_step_mcp_skip_discovery(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Continue setup without discovering tools."""
-        if self._mcp_config_tmp.mcp_config is None:
+        if self._mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
-        self._mcp_config_tmp.mcp_discovery = None
+        self._mcp_discovery = None
         return await self.async_step_mcp_options()
 
     async def async_step_mcp_tools(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Configure tool exposure from the discovered MCP catalogue."""
-        if self._mcp_config_tmp.mcp_discovery is None:
+        if self._mcp_discovery is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
         errors: dict[str, str] = {}
         if user_input is not None:
+            previous_config = self._mcp_service_config
             options = {
                 CONF_MCP_PERMANENT_TOOL_EXPOSURE: DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
                 CONF_MCP_PERMANENT_TOOLS: [],
@@ -370,12 +447,15 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             }
             errors = self._set_mcp_service_config(options)
             if not errors:
-                return await self.async_step_mcp_review()
+                if self._mcp_service_config != previous_config:
+                    self._mark_draft_changed()
+                self._workflow_status = "MCP tool settings are valid."
+                return await self.async_step_service_menu()
 
-        values = self._mcp_config_tmp.mcp_options or {}
+        values = self._mcp_options or {}
         tool_options = [
             SelectOptionDict(value=tool.name, label=tool.title or tool.name)
-            for tool in self._mcp_config_tmp.mcp_discovery.tools
+            for tool in self._mcp_discovery.tools
         ]
         schema = vol.Schema(
             {
@@ -416,9 +496,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_MCP_REGEX_TIMEOUT,
                         DEFAULT_MCP_REGEX_TIMEOUT,
                     ),
-                ): NumberSelector(
-                    NumberSelectorConfig(min=0.01, step=0.01)
-                ),
+                ): NumberSelector(NumberSelectorConfig(min=0.01, step=0.01)),
             }
         )
 
@@ -426,8 +504,8 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="mcp_tools",
             data_schema=schema,
             description_placeholders={
-                "server_name": self._mcp_config_tmp.mcp_discovery.server.name,
-                "tool_count": str(len(self._mcp_config_tmp.mcp_discovery.tools)),
+                "server_name": self._mcp_discovery.server.name,
+                "tool_count": str(len(self._mcp_discovery.tools)),
             },
             errors=errors,
         )
@@ -436,11 +514,12 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Configure MCP policies when initial tool discovery was skipped."""
-        if self._mcp_config_tmp.mcp_config is None:
+        if self._mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
         errors: dict[str, str] = {}
         if user_input is not None:
+            previous_config = self._mcp_service_config
             options = {
                 CONF_MCP_PERMANENT_TOOL_EXPOSURE: False,
                 CONF_MCP_PERMANENT_TOOLS: [],
@@ -449,9 +528,12 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             }
             errors = self._set_mcp_service_config(options)
             if not errors:
-                return await self.async_step_mcp_review()
+                if self._mcp_service_config != previous_config:
+                    self._mark_draft_changed()
+                self._workflow_status = "MCP discovery was skipped."
+                return await self.async_step_service_menu()
 
-        values = self._mcp_config_tmp.mcp_options or {}
+        values = self._mcp_options or {}
         return self.async_show_form(
             step_id="mcp_options",
             data_schema=vol.Schema(
@@ -469,9 +551,7 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                             CONF_MCP_REGEX_TIMEOUT,
                             DEFAULT_MCP_REGEX_TIMEOUT,
                         ),
-                    ): NumberSelector(
-                        NumberSelectorConfig(min=0.01, step=0.01)
-                    ),
+                    ): NumberSelector(NumberSelectorConfig(min=0.01, step=0.01)),
                 }
             ),
             errors=errors,
@@ -479,30 +559,26 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def _set_mcp_service_config(self, options: dict[str, Any]) -> dict[str, str]:
         """Validate MCP policies and retain their normalized service config."""
-        if self._mcp_config_tmp.mcp_config is None:
+        if self._mcp_config is None:
             return {"base": "mcp_invalid_flow_state"}
 
         try:
             service_config = MCPServiceConfig.from_selection(
-                self._mcp_config_tmp.mcp_config,
-                self._mcp_config_tmp.mcp_discovery,
-                permanent_tool_exposure=options[
-                    CONF_MCP_PERMANENT_TOOL_EXPOSURE
-                ],
+                self._mcp_config,
+                self._mcp_discovery,
+                permanent_tool_exposure=options[CONF_MCP_PERMANENT_TOOL_EXPOSURE],
                 selected_tool_names=options[CONF_MCP_PERMANENT_TOOLS],
-                include_permanent_schemas=options[
-                    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS
-                ],
+                include_permanent_schemas=options[CONF_MCP_INCLUDE_PERMANENT_SCHEMAS],
                 on_demand_discovery=options[CONF_MCP_ON_DEMAND_DISCOVERY],
                 regex_timeout=options[CONF_MCP_REGEX_TIMEOUT],
             )
         except MCPConfigError as err:
-            self._mcp_config_tmp.mcp_options = options
-            self._mcp_config_tmp.mcp_service_config = None
+            self._mcp_options = options
+            self._mcp_service_config = None
             return {err.field: err.code}
 
-        self._mcp_config_tmp.mcp_service_config = service_config
-        self._mcp_config_tmp.mcp_options = {
+        self._mcp_service_config = service_config
+        self._mcp_options = {
             CONF_MCP_PERMANENT_TOOL_EXPOSURE: service_config.permanent_tool_exposure,
             CONF_MCP_PERMANENT_TOOLS: [
                 tool.name for tool in service_config.permanent_tools
@@ -519,18 +595,19 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Review MCP policy and estimated permanent context size."""
-        if self._mcp_config_tmp.mcp_config is None:
+        if self._mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
-        service_config: MCPServiceConfig | None = self._mcp_config_tmp.mcp_service_config
+        service_config: MCPServiceConfig | None = (
+            self._mcp_service_config
+        )
         if service_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
 
         if user_input is not None:
-            return self.async_create_entry(
-                title=service_config.server.name,
-                data={**service_config.to_dict(), CONF_SERVICE_TYPE: SERVICE_TYPE_MCP},
-            )
+            self._reviewed_revision = self._draft_revision
+            self._workflow_status = "Settings reviewed. The service is ready to save."
+            return await self.async_step_service_menu()
 
         estimate: MCPContextEstimate = MCPContextEstimate.estimate_permanent_context(
             service_config.server,
@@ -542,7 +619,9 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="mcp_review",
             data_schema=vol.Schema({}),
             description_placeholders={
-                "permanent_exposure": ( "Yes" if service_config.permanent_tool_exposure else "No"),
+                "permanent_exposure": (
+                    "Yes" if service_config.permanent_tool_exposure else "No"
+                ),
                 "selected_tool_count": str(estimate.selected_tool_count),
                 "schemas_included": (
                     "Yes"
@@ -559,6 +638,111 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 "estimated_tokens": f"{estimate.estimated_tokens:,}",
             },
         )
+
+    async def async_step_service_review(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Review the currently selected service configuration."""
+        if self._selected_service_type == SERVICE_TYPE_MCP:
+            return await self.async_step_mcp_review(user_input)
+        if self._ai_endpoint_data is None:
+            return await self.async_step_service_menu()
+        if user_input is not None:
+            self._reviewed_revision = self._draft_revision
+            self._workflow_status = "Settings reviewed. The service is ready to save."
+            return await self.async_step_service_menu()
+        return self.async_show_form(
+            step_id="ai_endpoint_review",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "name": str(self._ai_endpoint_data.get(CONF_NAME, DEFAULT_NAME)),
+                "base_url": str(
+                    self._ai_endpoint_data.get(CONF_BASE_URL, DEFAULT_CONF_BASE_URL)
+                ),
+            },
+        )
+
+    async def async_step_service_save(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Persist a locally validated and reviewed service configuration."""
+        data = self._service_configuration()
+        if data is None or self._reviewed_revision != self._draft_revision:
+            self._workflow_status = "Review the current settings before saving."
+            return await self.async_step_service_menu()
+
+        title = str(data.get(CONF_NAME, DEFAULT_NAME))
+        if self._reconfigure_entry is not None:
+            return self.async_update_reload_and_abort(
+                self._reconfigure_entry, title=title, data=data
+            )
+        if self._selected_service_type == SERVICE_TYPE_MCP:
+            return self.async_create_entry(title=title, data=data)
+        return self.async_create_entry(
+            title=title,
+            data=data,
+            subentries=[
+                {
+                    "subentry_type": "conversation",
+                    "data": dict(DEFAULT_OPTIONS),
+                    "title": DEFAULT_CONVERSATION_NAME,
+                    "unique_id": None,
+                },
+                {
+                    "subentry_type": "ai_task_data",
+                    "data": dict(DEFAULT_AI_TASK_OPTIONS),
+                    "title": DEFAULT_AI_TASK_NAME,
+                    "unique_id": None,
+                },
+            ],
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Reconfigure an existing service through the shared workflow menu."""
+        entry = self._get_reconfigure_entry()
+        self._reconfigure_entry = entry
+        self._selected_service_type = get_service_type(entry)
+        if self._selected_service_type == SERVICE_TYPE_MCP:
+            service_config = MCPServiceConfig.from_dict(entry.data)
+            self._mcp_config = service_config.server
+            self._mcp_discovery = None
+            self._mcp_options = {
+                CONF_MCP_PERMANENT_TOOL_EXPOSURE: service_config.permanent_tool_exposure,
+                CONF_MCP_PERMANENT_TOOLS: [
+                    tool.name for tool in service_config.permanent_tools
+                ],
+                CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: service_config.include_permanent_schemas,
+                CONF_MCP_ON_DEMAND_DISCOVERY: service_config.on_demand_discovery,
+                CONF_MCP_REGEX_TIMEOUT: service_config.regex_timeout,
+            }
+            self._mcp_service_config = service_config
+        else:
+            self._ai_endpoint_data = dict(entry.data)
+        self._draft_revision = 1
+        self._reviewed_revision = None
+        return await self.async_step_service_menu()
+
+    def _select_service_type(self, service_type: str) -> None:
+        """Select a draft type and invalidate its previous review."""
+        if service_type != self._selected_service_type:
+            self._selected_service_type = service_type
+            self._mark_draft_changed()
+
+    def _mark_draft_changed(self) -> None:
+        """Invalidate review whenever meaningful draft state changes."""
+        self._draft_revision += 1
+        self._reviewed_revision = None
+
+    def _service_configuration(self) -> dict[str, Any] | None:
+        """Return the current valid service mapping without remote calls."""
+        if self._selected_service_type == SERVICE_TYPE_AI_ENDPOINT:
+            return self._ai_endpoint_data
+        service_config = self._mcp_service_config
+        if service_config is None:
+            return None
+        return {**service_config.to_dict(), CONF_SERVICE_TYPE: SERVICE_TYPE_MCP}
 
     @classmethod
     @callback
@@ -578,9 +762,14 @@ class ExtendedOpenAIConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         return {
             entry.data[CONF_MCP_SERVER_ID]
             for entry in self.hass.config_entries.async_entries(DOMAIN)
-            if get_service_type(entry) == SERVICE_TYPE_MCP
+            if (
+                self._reconfigure_entry is None
+                or entry.entry_id != self._reconfigure_entry.entry_id
+            )
+            and get_service_type(entry) == SERVICE_TYPE_MCP
             and CONF_MCP_SERVER_ID in entry.data
         }
+
 
 class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
     """Flow for managing OpenAI subentries."""

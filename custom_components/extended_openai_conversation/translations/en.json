@@ -22,6 +22,20 @@
                     "type": "Service type"
                 }
             },
+            "service_menu": {
+                "title": "Configure service",
+                "description": "Complete the available steps. Options appear when their prerequisites are valid.\n\n**{status}**",
+                "menu_options": {
+                    "switch_to_ai_endpoint": "Switch to Configure AI Endpoint",
+                    "switch_to_mcp": "Switch to Configure MCP Server",
+                    "ai_endpoint": "Configure AI Endpoint",
+                    "mcp": "Configure MCP Server",
+                    "mcp_perform_discovery": "Discover MCP Tools",
+                    "mcp_skip_discovery": "Skip Discovery",
+                    "service_review": "Review Settings",
+                    "service_save": "Save"
+                }
+            },
             "ai_endpoint": {
                 "title": "Add AI endpoint",
                 "data": {
@@ -47,7 +61,7 @@
                 "data_description": {
                     "server_id": "A short, unique ID used by conversation-agent function configuration.",
                     "description": "Optional model-visible description of the server's purpose.",
-                    "headers": "Optional HTTP headers, including static Authorization headers."
+                    "headers": "Enter a YAML or JSON object of header names and string values. Example: Authorization: \"Bearer token\". Do not include an outer headers key. Quote numeric, boolean, or null-like values so they remain strings."
                 }
             },
             "mcp_ask_discovery": {
@@ -96,7 +110,12 @@
             "mcp_review": {
                 "title": "Review MCP context",
                 "description": "Permanent exposure: {permanent_exposure}\n\nSelected permanent tools: {selected_tool_count}\n\nSchemas included: {schemas_included}\n\nOn-demand discovery: {on_demand_discovery}\n\nRegular-expression timeout: {regex_timeout} seconds\n\nPermanent context size: {character_count} characters ({byte_count} bytes)\n\nEstimated context cost per request: approximately {estimated_tokens} tokens",
-                "submit": "Add MCP service"
+                "submit": "Return to workflow"
+            },
+            "ai_endpoint_review": {
+                "title": "Review AI endpoint",
+                "description": "Name: {name}\n\nBase URL: {base_url}",
+                "submit": "Return to workflow"
             }
         }
     },

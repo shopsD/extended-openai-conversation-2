@@ -99,12 +99,43 @@ async def test_user_step_routes_to_mcp(hass):
     flow.async_step_mcp.assert_awaited_once_with()
 
 
-async def test_mcp_step_keeps_config_and_opens_discovery(hass):
-    """A valid MCP form successfully moves to tool discovery and keeps previous flow data."""
+async def test_ai_endpoint_is_reviewed_before_it_is_saved(hass):
+    """A valid AI endpoint returns to the menu and only saves after review."""
     flow = _config_flow(hass)
-    flow.async_step_mcp_ask_discovery = AsyncMock(
-        return_value={"step_id": "mcp_ask_discovery"}
-    )
+    flow._selected_service_type = SERVICE_TYPE_AI_ENDPOINT
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
+    user_input = {
+        "name": "Local AI",
+        CONF_API_KEY: "test-key",
+        CONF_BASE_URL: "https://ai.example.com/v1",
+    }
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow.validate_input",
+        new=AsyncMock(),
+    ):
+        result = await flow.async_step_ai_endpoint(user_input)
+
+    assert result == {"type": "menu"}
+    assert flow._ai_endpoint_data == {
+        **user_input,
+        CONF_SERVICE_TYPE: SERVICE_TYPE_AI_ENDPOINT,
+    }
+
+    await flow.async_step_service_review({})
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+    result = await flow.async_step_service_save()
+
+    assert result == {"type": "create_entry"}
+    assert flow.async_create_entry.call_args.kwargs["data"] == flow._ai_endpoint_data
+    assert len(flow.async_create_entry.call_args.kwargs["subentries"]) == 2
+
+
+async def test_mcp_step_keeps_config_and_returns_to_service_menu(hass):
+    """A valid MCP form returns to the central menu and keeps its data."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
+    flow.async_step_service_menu = AsyncMock(return_value={"step_id": "service_menu"})
     flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
     user_input = {
         "name": "Vault MCP",
@@ -114,17 +145,20 @@ async def test_mcp_step_keeps_config_and_opens_discovery(hass):
         CONF_MCP_HEADERS: {"Authorization": "Bearer test-token"},
     }
 
-    await flow.async_step_mcp(user_input)
+    result = await flow.async_step_mcp(user_input)
+
+    assert result == {"step_id": "service_menu"}
     assert flow._mcp_config_tmp.mcp_config is not None
     assert flow._mcp_config_tmp.mcp_config.server_id == "vault"
     assert flow._mcp_config_tmp.mcp_config.url == "https://mcp.example.com/api"
-    flow.async_step_mcp_ask_discovery.assert_awaited_once_with()
+    flow.async_step_service_menu.assert_awaited_once_with()
     flow.async_create_entry.assert_not_called()
 
 
-async def test_mcp_discovery_menu_does_not_connect(hass):
-    """Displaying the discovery choice does not contact the MCP server."""
+async def test_service_menu_unlocks_discovery_without_connecting(hass):
+    """A valid MCP server unlocks discovery without contacting it."""
     flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
     flow._mcp_config_tmp.mcp_config = MCPServerConfig(
         name="Vault MCP",
         server_id="vault",
@@ -137,14 +171,77 @@ async def test_mcp_discovery_menu_does_not_connect(hass):
         "MCPClientConfigFlow.discover",
         new=AsyncMock(),
     ) as mock_discover:
-        result = await flow.async_step_mcp_ask_discovery()
+        result = await flow.async_step_service_menu()
 
     assert result == {"type": "menu"}
     mock_discover.assert_not_awaited()
     assert flow.async_show_menu.call_args.kwargs == {
-        "step_id": "mcp_ask_discovery",
-        "menu_options": ["mcp_perform_discovery", "mcp_skip_discovery"],
+        "step_id": "service_menu",
+        "menu_options": [
+            "switch_to_ai_endpoint",
+            "mcp",
+            "mcp_perform_discovery",
+            "mcp_skip_discovery",
+        ],
+        "description_placeholders": {"status": ""},
     }
+
+
+async def test_service_menu_gates_review_and_save_by_draft_state(hass):
+    """Review requires valid policies, and Save requires the current review."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
+    flow._mcp_config_tmp.mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+    )
+    assert not flow._set_mcp_service_config(
+        {
+            CONF_MCP_PERMANENT_TOOL_EXPOSURE: False,
+            CONF_MCP_PERMANENT_TOOLS: [],
+            CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: False,
+            CONF_MCP_ON_DEMAND_DISCOVERY: True,
+            CONF_MCP_REGEX_TIMEOUT: 0.1,
+        }
+    )
+    flow._mark_draft_changed()
+    flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+
+    await flow.async_step_service_menu()
+
+    options = flow.async_show_menu.call_args.kwargs["menu_options"]
+    assert "service_review" in options
+    assert "service_save" not in options
+
+    flow._reviewed_revision = flow._draft_revision
+    await flow.async_step_service_menu()
+
+    assert "service_save" in flow.async_show_menu.call_args.kwargs["menu_options"]
+
+    flow._mark_draft_changed()
+    await flow.async_step_service_menu()
+
+    assert "service_save" not in flow.async_show_menu.call_args.kwargs["menu_options"]
+
+
+async def test_reconfigure_menu_keeps_existing_service_type(hass):
+    """Reconfiguration does not offer an unsupported entry-type conversion."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
+    flow._reconfigure_entry = MagicMock()
+    flow._mcp_config_tmp.mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+    )
+    flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+
+    await flow.async_step_service_menu()
+
+    options = flow.async_show_menu.call_args.kwargs["menu_options"]
+    assert "switch_to_ai_endpoint" not in options
+    assert options == ["mcp", "mcp_perform_discovery", "mcp_skip_discovery"]
 
 
 async def test_mcp_discover_step_keeps_catalogue_and_opens_tools(hass):
@@ -253,9 +350,10 @@ async def test_mcp_tools_step_displays_catalogue_and_policy_options(hass):
     ]
 
 
-async def test_mcp_tools_submission_opens_context_review(hass):
-    """Selected permanent tools produce a context estimate for review."""
+async def test_mcp_tools_submission_returns_to_menu_and_review_unlocks_save(hass):
+    """Tool settings return to the menu, then review unlocks Save."""
     flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
     flow._mcp_config_tmp.mcp_config = MCPServerConfig(
         name="Vault MCP",
         server_id="vault",
@@ -284,7 +382,7 @@ async def test_mcp_tools_submission_opens_context_review(hass):
             ),
         ),
     )
-    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
     selection = {
         CONF_MCP_PERMANENT_TOOL_EXPOSURE: True,
         CONF_MCP_PERMANENT_TOOLS: ["read_secret"],
@@ -295,8 +393,14 @@ async def test_mcp_tools_submission_opens_context_review(hass):
 
     result = await flow.async_step_mcp_tools(selection)
 
-    assert result == {"type": "form"}
+    assert result == {"type": "menu"}
     assert flow._mcp_config_tmp.mcp_options == selection
+    flow.async_step_service_menu.assert_awaited_once_with()
+
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    result = await flow.async_step_mcp_review()
+
+    assert result == {"type": "form"}
     call = flow.async_show_form.call_args.kwargs
     assert call["step_id"] == "mcp_review"
     placeholders = call["description_placeholders"]
@@ -308,9 +412,16 @@ async def test_mcp_tools_submission_opens_context_review(hass):
     assert int(placeholders["character_count"].replace(",", "")) > 0
     assert int(placeholders["byte_count"].replace(",", "")) > 0
     assert int(placeholders["estimated_tokens"].replace(",", "")) > 0
-    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+    flow.async_step_service_menu.reset_mock()
 
     result = await flow.async_step_mcp_review({})
+
+    assert result == {"type": "menu"}
+    assert flow._reviewed_revision == flow._draft_revision
+    flow.async_step_service_menu.assert_awaited_once_with()
+
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+    result = await flow.async_step_service_save()
 
     assert result == {"type": "create_entry"}
     flow.async_create_entry.assert_called_once_with(
@@ -322,16 +433,17 @@ async def test_mcp_tools_submission_opens_context_review(hass):
     )
 
 
-async def test_mcp_review_creates_entry_without_discovered_catalogue(hass):
-    """Skipped discovery creates an MCP entry without permanent tools."""
+async def test_mcp_skip_configuration_can_be_reviewed_and_saved(hass):
+    """Skipped discovery can be reviewed and saved without permanent tools."""
     flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
     flow._mcp_config_tmp.mcp_config = MCPServerConfig(
         name="Vault MCP",
         server_id="vault",
         url="https://mcp.example.com/api",
     )
     flow._mcp_config_tmp.mcp_discovery = None
-    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
 
     await flow.async_step_mcp_options(
         {
@@ -340,8 +452,9 @@ async def test_mcp_review_creates_entry_without_discovered_catalogue(hass):
         }
     )
 
+    await flow.async_step_mcp_review({})
     flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
-    result = await flow.async_step_mcp_review({})
+    result = await flow.async_step_service_save()
 
     assert result == {"type": "create_entry"}
     entry_data = flow.async_create_entry.call_args.kwargs["data"]
@@ -388,16 +501,17 @@ async def test_mcp_tools_rejects_tool_outside_discovered_catalogue(hass):
     }
 
 
-async def test_mcp_discover_failure_redisplays_form_for_retry(hass):
-    """Failed discovery preserves the configuration and permits another attempt."""
+async def test_mcp_discover_failure_returns_to_menu_for_retry_or_skip(hass):
+    """Failed discovery returns to the menu without losing server data."""
     flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
     config = MCPServerConfig(
         name="Vault MCP",
         server_id="vault",
         url="https://mcp.example.com/api",
     )
     flow._mcp_config_tmp.mcp_config = config
-    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
 
     with patch(
         "custom_components.extended_openai_conversation.config_flow."
@@ -406,14 +520,12 @@ async def test_mcp_discover_failure_redisplays_form_for_retry(hass):
     ) as mock_discover:
         result = await flow.async_step_mcp_perform_discovery()
 
-    assert result == {"type": "form"}
+    assert result == {"type": "menu"}
     mock_discover.assert_awaited_once_with(config)
     assert flow._mcp_config_tmp.mcp_config is config
     assert flow._mcp_config_tmp.mcp_discovery is None
-    assert flow.async_show_form.call_args.kwargs["step_id"] == "mcp_perform_discovery"
-    assert flow.async_show_form.call_args.kwargs["errors"] == {
-        "base": "mcp_tool_discovery_failed"
-    }
+    assert flow._workflow_status == "Unable to retrieve tools from the MCP server."
+    flow.async_step_service_menu.assert_awaited_once_with()
 
 
 async def test_mcp_skip_discovery_does_not_connect_and_opens_options(hass):
