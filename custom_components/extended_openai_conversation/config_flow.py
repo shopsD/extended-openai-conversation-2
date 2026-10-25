@@ -144,11 +144,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SERVICE_TYPE): SelectSelector(
             SelectSelectorConfig(
-                options=[
-                    SelectOptionDict(value=item["key"], label=item["label"])
-                    for item in SERVICE_TYPES
-                ],
+                options=[item["key"] for item in SERVICE_TYPES],
                 mode=SelectSelectorMode.DROPDOWN,
+                translation_key="service_type",
             )
         )
     }
@@ -246,13 +244,13 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         self._mcp_service_config: MCPServiceConfig | None = None
         self._mcp_oauth_data: dict[str, Any] | None = None
         self._mcp_oauth_authenticated: bool = False
-        self._mcp_connection_status: str = "Not checked"
-        self._mcp_discovery_status: str = "Not requested"
+        self._mcp_oauth_status: bool | None = None
+        self._mcp_connection_status: bool | None = None
+        self._mcp_discovery_status: bool | None = None
         self._selected_service_type: str | None = None
         self._ai_endpoint_data: dict[str, Any] | None = None
         self._draft_revision: int = 0
         self._reviewed_revision: int | None = None
-        self._workflow_status: str = ""
         self._reconfigure_entry: ConfigEntry | None = None
 
     async def async_step_user(
@@ -303,10 +301,39 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         ):
             options.append("service_save")
 
+        is_mcp = self._selected_service_type == SERVICE_TYPE_MCP
+        configuration_valid = (
+            self._mcp_config is not None
+            if is_mcp
+            else self._ai_endpoint_data is not None
+        )
+        connection_status = (
+            self._mcp_connection_status
+            if is_mcp
+            else (True if configuration_valid else None)
+        )
+        oauth_status = (
+            self._mcp_oauth_status
+            if is_mcp and self._mcp_config is not None and self._mcp_config.use_oauth
+            else None
+        )
+        settings_status = self._mcp_service_config is not None if is_mcp else None
+        review_status = (
+            self._reviewed_revision == self._draft_revision
+            if service_configuration is not None
+            else None
+        )
+
         return self.async_show_menu(
             step_id="service_menu",
             menu_options=options,
-            description_placeholders={"status": self._workflow_status},
+            description_placeholders={
+                "configuration_status": self._status_icon(configuration_valid),
+                "connection_status": self._status_icon(connection_status),
+                "oauth_status": self._status_icon(oauth_status),
+                "settings_status": self._status_icon(settings_status),
+                "review_status": self._status_icon(review_status),
+            },
         )
 
     async def async_step_switch_to_ai_endpoint(
@@ -345,7 +372,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 if data != self._ai_endpoint_data:
                     self._ai_endpoint_data = data
                     self._mark_draft_changed()
-                self._workflow_status = "AI endpoint configuration is valid."
                 return await self.async_step_service_menu()
 
         schema = self.add_suggested_values_to_schema(
@@ -376,6 +402,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             if self._oauth_connection_changed(previous_config, result.config):
                 self._mcp_oauth_data = None
                 self._mcp_oauth_authenticated = False
+                self._mcp_oauth_status = None
             self._mcp_config = result.config
             self._mcp_options = {
                 **(self._mcp_options or {}),
@@ -410,13 +437,9 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                     }
                 )
             if result.config.use_oauth and not self._mcp_oauth_authenticated:
-                self._mcp_connection_status = "Authentication required"
-                self._mcp_discovery_status = "Waiting for authentication"
+                self._mcp_connection_status = None
+                self._mcp_discovery_status = None
                 self._set_mcp_service_config(self._mcp_policy_values())
-                self._workflow_status = (
-                    "MCP server configuration is valid. Complete OAuth settings "
-                    "before filtering tools."
-                )
             else:
                 await self._async_test_mcp_server(run_requested_discovery=True)
                 self._set_mcp_service_config(self._mcp_policy_values())
@@ -494,9 +517,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             oauth_config = await async_discover_mcp_oauth(self._mcp_config.url)
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Unable to discover MCP OAuth metadata")
-            self._workflow_status = (
-                "Unable to discover OAuth settings from the MCP server."
-            )
+            self._mcp_oauth_status = False
             return await self.async_step_service_menu()
 
         self._mcp_oauth_data = {
@@ -562,6 +583,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
 
         self._mcp_oauth_data = oauth_data
         self._mcp_oauth_authenticated = True
+        self._mcp_oauth_status = True
         self._mark_draft_changed()
         await self._async_test_mcp_server(run_requested_discovery=True)
         self._set_mcp_service_config(self._mcp_policy_values())
@@ -575,7 +597,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         result = await super().async_step_creation(user_input)
         if result["type"] == FlowResultType.ABORT:
             self._mcp_oauth_authenticated = False
-            self._workflow_status = "MCP OAuth authentication failed."
+            self._mcp_oauth_status = False
             return await self.async_step_service_menu()
         return result
 
@@ -585,7 +607,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
     ) -> ConfigFlowResult:
         """Return a rejected OAuth authorization to the retained MCP draft."""
         self._mcp_oauth_authenticated = False
-        self._workflow_status = "MCP OAuth authorization was rejected."
+        self._mcp_oauth_status = False
         return await self.async_step_service_menu()
 
     async def async_step_mcp_filter_tools(
@@ -595,7 +617,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         if self._mcp_config is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
         if self._mcp_config.use_oauth and not self._mcp_oauth_authenticated:
-            self._workflow_status = "Complete OAuth settings before filtering tools."
             return await self.async_step_service_menu()
 
         errors: dict[str, str] = {}
@@ -606,7 +627,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             if not errors:
                 if self._mcp_service_config != previous_config:
                     self._mark_draft_changed()
-                self._workflow_status = "MCP tool filtering settings are valid."
                 return await self.async_step_service_menu()
 
         values = self._mcp_policy_values()
@@ -617,10 +637,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 SelectOptionDict(value=tool.name, label=tool.title or tool.name)
                 for tool in discovery.tools
             ]
-            mode_options = [
-                SelectOptionDict(value=MCP_TOOL_FILTER_SELECTED, label="Selected"),
-                SelectOptionDict(value=MCP_TOOL_FILTER_UNSELECTED, label="Unselected"),
-            ]
+            mode_options = [MCP_TOOL_FILTER_SELECTED, MCP_TOOL_FILTER_UNSELECTED]
             schema_fields.update(
                 {
                     vol.Required(
@@ -628,7 +645,9 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                         default=values[CONF_MCP_PERMANENT_TOOL_MODE],
                     ): SelectSelector(
                         SelectSelectorConfig(
-                            options=mode_options, mode=SelectSelectorMode.DROPDOWN
+                            options=mode_options,
+                            mode=SelectSelectorMode.DROPDOWN,
+                            translation_key="mcp_tool_filter_mode",
                         )
                     ),
                     vol.Optional(
@@ -647,7 +666,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                     ): BooleanSelector(),
                 }
             )
-        if values[CONF_MCP_ON_DEMAND_DISCOVERY]:
+        if values[CONF_MCP_ON_DEMAND_DISCOVERY] and discovery is not None:
             schema_fields.update(
                 {
                     vol.Required(
@@ -657,6 +676,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                         SelectSelectorConfig(
                             options=mode_options,
                             mode=SelectSelectorMode.DROPDOWN,
+                            translation_key="mcp_tool_filter_mode",
                         )
                     ),
                     vol.Optional(
@@ -708,31 +728,26 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 DEFAULT_MCP_PERFORM_TOOL_DISCOVERY,
             )
         )
+        if not discover:
+            self._mcp_discovery_status = None
         try:
             if run_requested_discovery and discover:
                 self._mcp_discovery = await processor.discover(
                     self._mcp_config, auth=auth
                 )
-                self._mcp_connection_status = "Connected"
-                self._mcp_discovery_status = (
-                    f"Succeeded ({len(self._mcp_discovery.tools)} tools)"
-                )
+                self._mcp_connection_status = True
+                self._mcp_discovery_status = True
             else:
                 await processor.check_connection(self._mcp_config, auth=auth)
-                self._mcp_connection_status = "Connected"
+                self._mcp_connection_status = True
                 if not discover:
-                    self._mcp_discovery_status = "Not requested"
+                    self._mcp_discovery_status = None
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Unable to connect to the MCP server")
-            self._mcp_connection_status = "Connection failed"
+            self._mcp_connection_status = False
             if run_requested_discovery and discover:
                 self._mcp_discovery = None
-                self._mcp_discovery_status = "Failed"
-            self._workflow_status = (
-                "MCP server settings were saved, but the connection check failed."
-            )
-        else:
-            self._workflow_status = "MCP server connection succeeded."
+                self._mcp_discovery_status = False
 
     def _mcp_policy_values(self) -> dict[str, Any]:
         """Return complete policy values using the current draft and defaults."""
@@ -776,7 +791,8 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 self._mcp_discovery = await processor.discover(self._mcp_config)
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected error during MCP tool discovery")
-            self._workflow_status = "Unable to retrieve tools from the MCP server."
+            self._mcp_connection_status = False
+            self._mcp_discovery_status = False
             return await self.async_step_service_menu()
         else:
             # restore the previous options
@@ -831,7 +847,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             if not errors:
                 if self._mcp_service_config != previous_config:
                     self._mark_draft_changed()
-                self._workflow_status = "MCP tool settings are valid."
                 return await self.async_step_service_menu()
 
         values = self._mcp_options or {}
@@ -912,7 +927,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             if not errors:
                 if self._mcp_service_config != previous_config:
                     self._mark_draft_changed()
-                self._workflow_status = "MCP discovery was skipped."
+                self._mcp_discovery_status = None
                 return await self.async_step_service_menu()
 
         values = self._mcp_options or {}
@@ -994,11 +1009,10 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
 
         if user_input is not None:
             self._reviewed_revision = self._draft_revision
-            self._workflow_status = "Settings reviewed. The service is ready to save."
             return await self.async_step_service_menu()
 
         if service_config.server.use_oauth and not self._mcp_oauth_authenticated:
-            self._mcp_connection_status = "Authentication incomplete"
+            self._mcp_connection_status = None
         else:
             await self._async_test_mcp_server(run_requested_discovery=False)
 
@@ -1013,37 +1027,36 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             step_id="mcp_review",
             data_schema=vol.Schema({}),
             description_placeholders={
-                "permanent_exposure": (
-                    "Include selected"
-                    if service_config.permanent_tool_mode == MCP_TOOL_FILTER_SELECTED
-                    else "Include all except selected"
+                "permanent_tools_selected": self._status_icon(
+                    service_config.permanent_tool_mode == MCP_TOOL_FILTER_SELECTED
                 ),
                 "selected_tool_count": str(estimate.selected_tool_count),
-                "schemas_included": (
-                    "Yes"
-                    if service_config.include_permanent_schemas
-                    and estimate.selected_tool_count
-                    else "No"
+                "schemas_included": self._status_icon(
+                    bool(
+                        service_config.include_permanent_schemas
+                        and estimate.selected_tool_count
+                    )
                 ),
-                "on_demand_discovery": (
-                    "Yes" if service_config.on_demand_discovery else "No"
+                "on_demand_discovery": self._status_icon(
+                    service_config.on_demand_discovery
                 ),
-                "default_prompt": (
-                    "Yes" if service_config.provide_default_prompt else "No"
+                "default_prompt": self._status_icon(
+                    service_config.provide_default_prompt
                 ),
-                "disabled_tool_mode": (
-                    "Disable selected"
-                    if service_config.disabled_tool_mode == MCP_TOOL_FILTER_SELECTED
-                    else "Disable all except selected"
+                "disabled_tools_selected": self._status_icon(
+                    service_config.disabled_tool_mode == MCP_TOOL_FILTER_SELECTED
                 ),
                 "disabled_tool_count": str(len(service_config.disabled_tools)),
-                "tool_name_pattern": service_config.tool_name_pattern or "None",
-                "connection_status": self._mcp_connection_status,
-                "discovery_status": self._mcp_discovery_status,
+                "tool_name_pattern": service_config.tool_name_pattern or "—",
+                "connection_status": self._status_icon(self._mcp_connection_status),
+                "discovery_status": self._status_icon(self._mcp_discovery_status),
+                "discovered_tool_count": str(
+                    len(self._mcp_discovery.tools) if self._mcp_discovery else 0
+                ),
                 "regex_timeout": str(service_config.regex_timeout),
-                "character_count": f"{estimate.character_count:,}",
-                "byte_count": f"{estimate.byte_count:,}",
-                "estimated_tokens": f"{estimate.estimated_tokens:,}",
+                "character_count": str(estimate.character_count),
+                "byte_count": str(estimate.byte_count),
+                "estimated_tokens": str(estimate.estimated_tokens),
             },
         )
 
@@ -1057,7 +1070,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             return await self.async_step_service_menu()
         if user_input is not None:
             self._reviewed_revision = self._draft_revision
-            self._workflow_status = "Settings reviewed. The service is ready to save."
             return await self.async_step_service_menu()
         return self.async_show_form(
             step_id="ai_endpoint_review",
@@ -1082,7 +1094,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         """Persist a locally validated and reviewed service configuration."""
         data = self._service_configuration()
         if data is None or self._reviewed_revision != self._draft_revision:
-            self._workflow_status = "Review the current settings before saving."
             return await self.async_step_service_menu()
 
         title = str(data.get(CONF_NAME, DEFAULT_NAME))
@@ -1175,6 +1186,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                     if key in entry.data
                 }
                 self._mcp_oauth_authenticated = CONF_TOKEN in self._mcp_oauth_data
+                self._mcp_oauth_status = True if self._mcp_oauth_authenticated else None
         else:
             self._ai_endpoint_data = dict(entry.data)
         self._draft_revision = 1
@@ -1191,6 +1203,13 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         """Invalidate review whenever meaningful draft state changes."""
         self._draft_revision += 1
         self._reviewed_revision = None
+
+    @staticmethod
+    def _status_icon(status: bool | None) -> str:
+        """Return a locale-neutral status marker for translated descriptions."""
+        if status is None:
+            return "—"
+        return "✅" if status else "❌"
 
     def _service_configuration(self) -> dict[str, Any] | None:
         """Return the current valid service mapping without remote calls."""

@@ -17,6 +17,11 @@
             "unknown": "Unexpected error",
             "mcp_tool_discovery_failed": "Unable to retrieve tools from the MCP server."
         },
+        "abort": {
+            "entry_not_loaded": "The configuration entry must be loaded before it can be changed.",
+            "mcp_invalid_flow_state": "The MCP setup state is no longer valid. Start the setup flow again.",
+            "missing_credentials": "No OAuth Application Credentials are configured for this server. Add them in the Application Credentials settings, then try again."
+        },
         "step": {
             "user": {
                 "title": "Choose service type",
@@ -27,7 +32,7 @@
             },
             "service_menu": {
                 "title": "Configure service",
-                "description": "Complete the available steps. Options appear when their prerequisites are valid.\n\n**{status}**",
+                "description": "Complete the available steps. Options appear when their prerequisites are valid.\n\nConfiguration valid: {configuration_status}\n\nConnection succeeded: {connection_status}\n\nOAuth completed: {oauth_status}\n\nMCP settings valid: {settings_status}\n\nReview completed: {review_status}",
                 "menu_options": {
                     "switch_to_ai_endpoint": "Switch to Configure AI Endpoint",
                     "switch_to_mcp": "Switch to Configure MCP Server",
@@ -79,6 +84,14 @@
                 "title": "OAuth settings",
                 "description": "Authenticate with the MCP server using OAuth.",
                 "submit": "Start OAuth"
+            },
+            "credentials_choice": {
+                "title": "Choose OAuth credentials",
+                "description": "Use existing Home Assistant Application Credentials for this authorization server, or add new credentials.",
+                "menu_options": {
+                    "pick_implementation": "Use existing credentials",
+                    "new_credentials": "Add new credentials"
+                }
             },
             "mcp_filter_tools": {
                 "title": "Filter MCP tools",
@@ -147,13 +160,27 @@
             },
             "mcp_review": {
                 "title": "Review MCP context",
-                "description": "Connection: {connection_status}\n\nInitial discovery: {discovery_status}\n\nPermanent selection: {permanent_exposure}\n\nResolved permanent tools: {selected_tool_count}\n\nSchemas included: {schemas_included}\n\nDefault MCP prompt: {default_prompt}\n\nOn-demand discovery: {on_demand_discovery}\n\nDisabled tool policy: {disabled_tool_mode} ({disabled_tool_count} selected)\n\nTool-name regular expression: {tool_name_pattern}\n\nRegular-expression timeout: {regex_timeout} seconds\n\nPermanent context size: {character_count} characters ({byte_count} bytes)\n\nEstimated context cost per request: approximately {estimated_tokens} tokens",
+                "description": "Connection succeeded: {connection_status}\n\nInitial discovery succeeded: {discovery_status}\n\nDiscovered tools: {discovered_tool_count}\n\nPermanent selection uses selected tools: {permanent_tools_selected}\n\nResolved permanent tools: {selected_tool_count}\n\nSchemas included: {schemas_included}\n\nDefault MCP prompt: {default_prompt}\n\nOn-demand discovery: {on_demand_discovery}\n\nDisabled selection disables selected tools: {disabled_tools_selected}\n\nSelected disabled tools: {disabled_tool_count}\n\nTool-name regular expression: {tool_name_pattern}\n\nRegular-expression timeout: {regex_timeout} seconds\n\nPermanent context size: {character_count} characters ({byte_count} bytes)\n\nEstimated context cost per request: approximately {estimated_tokens} tokens",
                 "submit": "Return to workflow"
             },
             "ai_endpoint_review": {
                 "title": "Review AI endpoint",
                 "description": "Name: {name}\n\nBase URL: {base_url}",
                 "submit": "Return to workflow"
+            }
+        }
+    },
+    "selector": {
+        "service_type": {
+            "options": {
+                "ai_endpoint": "AI endpoint",
+                "mcp": "MCP server"
+            }
+        },
+        "mcp_tool_filter_mode": {
+            "options": {
+                "selected": "Selected",
+                "unselected": "Unselected"
             }
         }
     },

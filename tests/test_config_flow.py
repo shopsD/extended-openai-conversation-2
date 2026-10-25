@@ -82,6 +82,12 @@ async def test_user_step_asks_for_service_type(hass):
     schema = flow.async_show_form.call_args.kwargs["data_schema"]
     assert flow.async_show_form.call_args.kwargs["step_id"] == "user"
     assert _schema_keys(schema.schema) == {CONF_SERVICE_TYPE}
+    selector = next(iter(schema.schema.values()))
+    assert selector.config["translation_key"] == "service_type"
+    assert selector.config["options"] == [
+        SERVICE_TYPE_AI_ENDPOINT,
+        SERVICE_TYPE_MCP,
+    ]
 
 
 async def test_user_step_routes_to_ai_endpoint(hass):
@@ -216,7 +222,13 @@ async def test_service_menu_exposes_filtering_without_connecting(hass):
             "mcp",
             "mcp_filter_tools",
         ],
-        "description_placeholders": {"status": ""},
+        "description_placeholders": {
+            "configuration_status": "✅",
+            "connection_status": "—",
+            "oauth_status": "—",
+            "settings_status": "❌",
+            "review_status": "—",
+        },
     }
 
 
@@ -408,8 +420,8 @@ async def test_requested_initial_discovery_caches_catalogue(hass):
 
     mock_discover.assert_awaited_once_with(config, auth=None)
     assert flow._mcp_discovery is discovery
-    assert flow._mcp_connection_status == "Connected"
-    assert flow._mcp_discovery_status == "Succeeded (1 tools)"
+    assert flow._mcp_connection_status is True
+    assert flow._mcp_discovery_status is True
 
 
 async def test_filter_tools_step_displays_catalogue_policy_options(hass):
@@ -479,6 +491,37 @@ async def test_filter_tools_step_displays_catalogue_policy_options(hass):
         {"value": "read_secret", "label": "Read secret"},
         {"value": "write_secret", "label": "write_secret"},
     ]
+    permanent_mode = next(
+        selector
+        for marker, selector in schema.items()
+        if getattr(marker, "schema", marker) == CONF_MCP_PERMANENT_TOOL_MODE
+    )
+    assert permanent_mode.config["translation_key"] == "mcp_tool_filter_mode"
+    assert permanent_mode.config["options"] == ["selected", "unselected"]
+
+
+async def test_filter_tools_without_catalogue_only_displays_regex_options(hass):
+    """Manual tool selectors require a discovered catalogue."""
+    flow = _config_flow(hass)
+    flow._mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+    )
+    flow._mcp_options = {
+        CONF_MCP_PERFORM_TOOL_DISCOVERY: False,
+        CONF_MCP_ON_DEMAND_DISCOVERY: True,
+    }
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+    result = await flow.async_step_mcp_filter_tools()
+
+    assert result == {"type": "form"}
+    schema = flow.async_show_form.call_args.kwargs["data_schema"].schema
+    assert _schema_keys(schema) == {
+        CONF_MCP_TOOL_NAME_PATTERN,
+        CONF_MCP_REGEX_TIMEOUT,
+    }
 
 
 async def test_filter_submission_returns_to_menu_and_review_unlocks_save(hass):
@@ -545,10 +588,10 @@ async def test_filter_submission_returns_to_menu_and_review_unlocks_save(hass):
     call = flow.async_show_form.call_args.kwargs
     assert call["step_id"] == "mcp_review"
     placeholders = call["description_placeholders"]
-    assert placeholders["permanent_exposure"] == "Include selected"
+    assert placeholders["permanent_tools_selected"] == "✅"
     assert placeholders["selected_tool_count"] == "1"
-    assert placeholders["schemas_included"] == "Yes"
-    assert placeholders["on_demand_discovery"] == "Yes"
+    assert placeholders["schemas_included"] == "✅"
+    assert placeholders["on_demand_discovery"] == "✅"
     assert placeholders["regex_timeout"] == "0.1"
     assert int(placeholders["character_count"].replace(",", "")) > 0
     assert int(placeholders["byte_count"].replace(",", "")) > 0
@@ -676,8 +719,8 @@ async def test_initial_discovery_failure_retains_server_draft(hass):
     mock_discover.assert_awaited_once_with(config, auth=None)
     assert flow._mcp_config is config
     assert flow._mcp_discovery is None
-    assert flow._mcp_connection_status == "Connection failed"
-    assert flow._mcp_discovery_status == "Failed"
+    assert flow._mcp_connection_status is False
+    assert flow._mcp_discovery_status is False
 
 
 async def test_disabled_initial_discovery_only_checks_connection(hass):
