@@ -35,7 +35,11 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
-from homeassistant.exceptions import HomeAssistantError, UnknownImplementationError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    HomeAssistantError,
+    UnknownImplementationError,
+)
 from homeassistant.helpers.config_entry_oauth2_flow import (
     AbstractOAuth2FlowHandler,
     async_get_config_entry_implementation,
@@ -164,7 +168,11 @@ from .mcp_client import (
     async_discover_mcp_oauth,
     async_register_mcp_oauth_client,
 )
-from .mcp_oauth import oauth_application_context_from_data, static_oauth_auth
+from .mcp_oauth import (
+    async_get_mcp_oauth_auth,
+    oauth_application_context_from_data,
+    static_oauth_auth,
+)
 from .skills import SkillManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -217,6 +225,10 @@ def _mcp_failure_reason(error: BaseException, default: str) -> str:
         for current in exceptions
     ):
         return MCP_ERROR_CANNOT_CONNECT
+    if any(
+        isinstance(current, ConfigEntryAuthFailed) for current in exceptions
+    ):
+        return MCP_ERROR_AUTHENTICATION_FAILED
     if any(isinstance(current, MCPProtocolError) for current in exceptions):
         return MCP_ERROR_INVALID_RESPONSE
     if any(isinstance(current, MCPAuthenticationError) for current in exceptions):
@@ -326,6 +338,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         self._mcp_options: dict[str, Any] | None = None
         self._mcp_service_config: MCPServiceConfig | None = None
         self._mcp_oauth_data: dict[str, Any] | None = None
+        self._mcp_oauth_from_entry: bool = False
         self._mcp_oauth_authenticated: bool = False
         self._mcp_oauth_status: bool | None = None
         self._mcp_oauth_timeout: float = DEFAULT_MCP_OAUTH_TIMEOUT
@@ -506,6 +519,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 self._mark_draft_changed()
             if self._oauth_connection_changed(previous_config, result.config):
                 self._mcp_oauth_data = None
+                self._mcp_oauth_from_entry = False
                 self._mcp_oauth_authenticated = False
                 self._mcp_oauth_status = None
                 self._mcp_error_reason = None
@@ -658,6 +672,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             CONF_MCP_OAUTH_REGISTRATION_URL: oauth_config.registration_url,
             CONF_MCP_SERVER_URL: oauth_config.resource,
         }
+        self._mcp_oauth_from_entry = False
         self._mcp_error_reason = None
         return await self._async_start_mcp_oauth()
 
@@ -913,6 +928,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             )
 
         self._mcp_oauth_data = oauth_data
+        self._mcp_oauth_from_entry = False
         self._mcp_oauth_authenticated = True
         self._mcp_oauth_status = True
         self._mcp_error_reason = None
@@ -1063,7 +1079,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             return
         self._mcp_error_reason = None
         processor = MCPClientConfigFlow(self._mcp_server_ids())
-        auth = self._mcp_oauth_auth() if self._mcp_config.use_oauth else None
         discover = bool(
             (self._mcp_options or {}).get(
                 CONF_MCP_PERFORM_TOOL_DISCOVERY,
@@ -1073,6 +1088,11 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         if not discover:
             self._mcp_discovery_status = None
         try:
+            auth = (
+                await self._async_mcp_oauth_auth()
+                if self._mcp_config.use_oauth
+                else None
+            )
             if run_requested_discovery and discover:
                 self._mcp_discovery = await processor.discover(
                     self._mcp_config, auth=auth
@@ -1090,9 +1110,14 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             _LOGGER.exception("Unable to connect to the MCP server")
             self._mcp_connection_status = False
             self._mcp_error_reason = _mcp_failure_reason(err, MCP_ERROR_UNKNOWN)
+            if self._mcp_error_reason == MCP_ERROR_AUTHENTICATION_FAILED:
+                self._mcp_oauth_authenticated = False
+                self._mcp_oauth_status = False
             if run_requested_discovery and discover:
                 self._mcp_discovery = None
                 self._mcp_discovery_status = False
+        finally:
+            self._sync_mcp_oauth_token_from_entry()
 
     def _mcp_policy_values(self) -> dict[str, Any]:
         """Return complete policy values using the current draft and defaults."""
@@ -1131,7 +1156,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         try:
             if self._mcp_config.use_oauth:
                 self._mcp_discovery = await processor.discover(
-                    self._mcp_config, auth=self._mcp_oauth_auth()
+                    self._mcp_config, auth=await self._async_mcp_oauth_auth()
                 )
             else:
                 self._mcp_discovery = await processor.discover(self._mcp_config)
@@ -1142,6 +1167,9 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             self._mcp_error_reason = _mcp_failure_reason(
                 err, MCP_ERROR_INVALID_RESPONSE
             )
+            if self._mcp_error_reason == MCP_ERROR_AUTHENTICATION_FAILED:
+                self._mcp_oauth_authenticated = False
+                self._mcp_oauth_status = False
             return await self.async_step_service_menu()
         else:
             # restore the previous options
@@ -1164,6 +1192,8 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             self._mcp_error_reason = None
             self._mark_draft_changed()
             return await self.async_step_mcp_tools()
+        finally:
+            self._sync_mcp_oauth_token_from_entry()
 
     async def async_step_mcp_skip_discovery(
         self, user_input: dict[str, Any] | None = None
@@ -1542,6 +1572,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                         CONF_MCP_OAUTH_SCOPE,
                         CONF_MCP_OAUTH_ISSUER,
                         CONF_MCP_OAUTH_REGISTRATION_URL,
+                        CONF_MCP_SERVER_URL,
                         "auth_implementation",
                         CONF_TOKEN,
                     )
@@ -1549,10 +1580,17 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 }
                 self._mcp_oauth_authenticated = CONF_TOKEN in self._mcp_oauth_data
                 self._mcp_oauth_status = True if self._mcp_oauth_authenticated else None
+                self._mcp_oauth_from_entry = self._mcp_oauth_authenticated
         else:
             self._ai_endpoint_data = dict(entry.data)
         self._draft_revision = 1
         self._reviewed_revision = None
+        if (
+            self._selected_service_type == SERVICE_TYPE_MCP
+            and self._mcp_config is not None
+            and (not self._mcp_config.use_oauth or self._mcp_oauth_authenticated)
+        ):
+            await self._async_test_mcp_server(run_requested_discovery=True)
         return await self.async_step_service_menu()
 
     def _select_service_type(self, service_type: str) -> None:
@@ -1588,11 +1626,26 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 data.update(self._mcp_oauth_data)
         return data
 
-    def _mcp_oauth_auth(self) -> Any:
-        """Return static bearer authentication for config-flow MCP requests."""
+    async def _async_mcp_oauth_auth(self) -> httpx.Auth:
+        """Return refreshable saved auth or static auth for a new OAuth result."""
         if self._mcp_oauth_data is None or CONF_TOKEN not in self._mcp_oauth_data:
             raise HomeAssistantError("MCP OAuth authentication has not completed")
+        if self._mcp_oauth_from_entry and self._reconfigure_entry is not None:
+            return await async_get_mcp_oauth_auth(
+                self.hass, self._reconfigure_entry
+            )
         return static_oauth_auth(self._mcp_oauth_data)
+
+    def _sync_mcp_oauth_token_from_entry(self) -> None:
+        """Retain a token refreshed by Home Assistant during reconfiguration."""
+        if (
+            not self._mcp_oauth_from_entry
+            or self._reconfigure_entry is None
+            or self._mcp_oauth_data is None
+            or CONF_TOKEN not in self._reconfigure_entry.data
+        ):
+            return
+        self._mcp_oauth_data[CONF_TOKEN] = self._reconfigure_entry.data[CONF_TOKEN]
 
     def _oauth_application_context(self) -> AbstractContextManager[None]:
         """Activate the current server for Home Assistant Application Credentials."""

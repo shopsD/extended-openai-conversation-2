@@ -50,6 +50,7 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPOAuthConfiguration,
     MCPServerConfig,
     MCPServerInformation,
+    MCPServiceConfig,
     MCPTool,
 )
 from custom_components.extended_openai_conversation.mcp_client.mcp_const import (
@@ -71,7 +72,7 @@ from custom_components.extended_openai_conversation.mcp_client.mcp_const import 
     CONF_MCP_TOOL_NAME_PATTERN,
     CONF_MCP_USE_OAUTH,
 )
-from homeassistant.const import CONF_API_KEY
+from homeassistant.const import CONF_API_KEY, CONF_TOKEN
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 
@@ -758,6 +759,88 @@ async def test_reconfigure_menu_keeps_existing_service_type(hass):
     options = flow.async_show_menu.call_args.kwargs["menu_options"]
     assert "switch_to_ai_endpoint" not in options
     assert options == ["mcp", "mcp_filter_tools"]
+
+
+async def test_reconfigure_restores_discovery_with_refreshable_oauth(hass):
+    """Reconfigure refreshes OAuth and restores the requested tool catalogue."""
+    flow = _config_flow(hass)
+    config = MCPServiceConfig(
+        server=MCPServerConfig(
+            name="Vault MCP",
+            server_id="vault",
+            url="https://mcp.example.com/api",
+            use_oauth=True,
+        )
+    )
+    old_token = {
+        "access_token": "expired-token",
+        "refresh_token": "refresh-token",
+        "expires_at": 0,
+    }
+    refreshed_token = {
+        "access_token": "refreshed-token",
+        "refresh_token": "refresh-token",
+        "expires_at": 9999999999,
+    }
+    entry = MagicMock()
+    entry.entry_id = "entry-vault"
+    entry.title = "Vault MCP"
+    entry.data = {
+        **config.to_dict(),
+        CONF_SERVICE_TYPE: SERVICE_TYPE_MCP,
+        "authorization_url": "https://auth.example.com/authorize",
+        "token_url": "https://auth.example.com/token",
+        "oauth_scope": ["mcp"],
+        "oauth_issuer": "https://auth.example.com/",
+        "auth_implementation": "https://auth.example.com/",
+        CONF_TOKEN: old_token,
+    }
+    flow._get_reconfigure_entry = MagicMock(return_value=entry)
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
+    managed_auth = MagicMock(spec=httpx.Auth)
+    discovery_result = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(),
+    )
+
+    async def refresh_during_discovery(*_args, **_kwargs) -> MCPDiscoveryResult:
+        entry.data = {**entry.data, CONF_TOKEN: refreshed_token}
+        return discovery_result
+
+    with (
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_get_mcp_oauth_auth",
+            new=AsyncMock(return_value=managed_auth),
+        ) as get_auth,
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "MCPClientConfigFlow.check_connection",
+            new=AsyncMock(),
+        ) as check_connection,
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "MCPClientConfigFlow.discover",
+            new=AsyncMock(side_effect=refresh_during_discovery),
+        ) as discover,
+    ):
+        result = await flow.async_step_reconfigure()
+
+    assert result == {"type": "menu"}
+    get_auth.assert_awaited_once_with(hass, entry)
+    discover.assert_awaited_once_with(config.server, auth=managed_auth)
+    check_connection.assert_not_awaited()
+    assert flow._mcp_connection_status is True
+    assert flow._mcp_discovery_status is True
+    assert flow._mcp_discovery is discovery_result
+    assert flow._mcp_oauth_data is not None
+    assert flow._mcp_oauth_data[CONF_TOKEN] == refreshed_token
 
 
 async def test_requested_initial_discovery_caches_catalogue(hass):
