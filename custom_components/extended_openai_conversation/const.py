@@ -22,6 +22,12 @@ CONF_SERVICE_TYPE = "type"
 SERVICE_TYPE_AI_ENDPOINT = "ai_endpoint"
 SERVICE_TYPE_MCP = "mcp"
 
+CONF_MCP_OAUTH_ACTION = "oauth_action"
+CONF_MCP_OAUTH_TIMEOUT = "oauth_timeout"
+MCP_OAUTH_ACTION_PROCEED = "proceed"
+MCP_OAUTH_ACTION_RETURN = "return"
+DEFAULT_MCP_OAUTH_TIMEOUT = 120.0
+
 SERVICE_TYPES = [
     {"key": SERVICE_TYPE_AI_ENDPOINT, "label": "AI endpoint"},
     {"key": SERVICE_TYPE_MCP, "label": "MCP"},

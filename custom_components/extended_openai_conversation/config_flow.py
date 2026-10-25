@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
 import logging
@@ -33,7 +34,7 @@ from homeassistant.const import (
     CONF_TOKEN,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
 from homeassistant.exceptions import HomeAssistantError, UnknownImplementationError
 from homeassistant.helpers.config_entry_oauth2_flow import (
     AbstractOAuth2FlowHandler,
@@ -71,6 +72,8 @@ from .const import (
     CONF_FUNCTION_TOOLS,
     CONF_MAX_FUNCTION_CALLS_PER_CONVERSATION,
     CONF_MAX_TOKENS,
+    CONF_MCP_OAUTH_ACTION,
+    CONF_MCP_OAUTH_TIMEOUT,
     CONF_ORGANIZATION,
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
@@ -95,6 +98,7 @@ from .const import (
     DEFAULT_EXTRA_BODY,
     DEFAULT_MAX_FUNCTION_CALLS_PER_CONVERSATION,
     DEFAULT_MAX_TOKENS,
+    DEFAULT_MCP_OAUTH_TIMEOUT,
     DEFAULT_NAME,
     DEFAULT_PROMPT,
     DEFAULT_REASONING_EFFORT,
@@ -104,6 +108,8 @@ from .const import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
     DOMAIN,
+    MCP_OAUTH_ACTION_PROCEED,
+    MCP_OAUTH_ACTION_RETURN,
     REASONING_EFFORT_OPTIONS,
     SERVICE_TIER_OPTIONS,
     SERVICE_TYPE_AI_ENDPOINT,
@@ -168,6 +174,7 @@ MCP_ERROR_AUTHENTICATION_FAILED = "authentication_failed"
 MCP_ERROR_CANNOT_CONNECT = "cannot_connect"
 MCP_ERROR_INVALID_RESPONSE = "invalid_mcp_response"
 MCP_ERROR_OAUTH_DISCOVERY_FAILED = "oauth_discovery_failed"
+MCP_ERROR_OAUTH_TIMEOUT = "oauth_authorization_timeout"
 MCP_ERROR_SERVER_ERROR = "mcp_server_error"
 MCP_ERROR_SERVER_NOT_FOUND = "mcp_server_not_found"
 MCP_ERROR_UNKNOWN = "unknown_mcp_error"
@@ -321,6 +328,9 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         self._mcp_oauth_data: dict[str, Any] | None = None
         self._mcp_oauth_authenticated: bool = False
         self._mcp_oauth_status: bool | None = None
+        self._mcp_oauth_timeout: float = DEFAULT_MCP_OAUTH_TIMEOUT
+        self._mcp_oauth_timeout_task: asyncio.Task[None] | None = None
+        self._mcp_oauth_attempt: int = 0
         self._mcp_connection_status: bool | None = None
         self._mcp_discovery_status: bool | None = None
         self._mcp_error_reason: str | None = None
@@ -607,9 +617,29 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             return self.async_abort(reason="mcp_invalid_flow_state")
         if user_input is None:
             self._mcp_error_reason = None
-            return self.async_show_form(
-                step_id="mcp_authenticate", data_schema=vol.Schema({})
+            return self._show_mcp_authenticate_form()
+
+        action = user_input.get(CONF_MCP_OAUTH_ACTION)
+        if action not in {MCP_OAUTH_ACTION_PROCEED, MCP_OAUTH_ACTION_RETURN}:
+            return self._show_mcp_authenticate_form(
+                user_input,
+                errors={CONF_MCP_OAUTH_ACTION: "invalid_oauth_action"},
             )
+        timeout = user_input.get(CONF_MCP_OAUTH_TIMEOUT)
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or timeout < 0
+        ):
+            return self._show_mcp_authenticate_form(
+                user_input,
+                errors={CONF_MCP_OAUTH_TIMEOUT: "invalid_oauth_timeout"},
+            )
+        self._mcp_oauth_timeout = float(timeout)
+        if action == MCP_OAUTH_ACTION_RETURN:
+            self._cancel_mcp_oauth_timeout()
+            return await self.async_step_service_menu()
+
         try:
             oauth_config = await async_discover_mcp_oauth(self._mcp_config.url)
         except Exception as err:  # pylint: disable=broad-except
@@ -630,6 +660,37 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         }
         self._mcp_error_reason = None
         return await self._async_start_mcp_oauth()
+
+    def _show_mcp_authenticate_form(
+        self,
+        values: dict[str, Any] | None = None,
+        *,
+        errors: dict[str, str] | None = None,
+    ) -> ConfigFlowResult:
+        """Show OAuth navigation and callback-timeout settings."""
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_MCP_OAUTH_ACTION, default=MCP_OAUTH_ACTION_PROCEED
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[MCP_OAUTH_ACTION_PROCEED, MCP_OAUTH_ACTION_RETURN],
+                        mode=SelectSelectorMode.LIST,
+                        translation_key="mcp_oauth_action",
+                    )
+                ),
+                vol.Required(
+                    CONF_MCP_OAUTH_TIMEOUT, default=self._mcp_oauth_timeout
+                ): NumberSelector(NumberSelectorConfig(min=0, step=1)),
+            }
+        )
+        if values is not None:
+            schema = self.add_suggested_values_to_schema(schema, values)
+        return self.async_show_form(
+            step_id="mcp_authenticate",
+            data_schema=schema,
+            errors=errors or {},
+        )
 
     async def _async_start_mcp_oauth(self) -> ConfigFlowResult:
         """Reuse, register, or collect issuer-bound OAuth credentials."""
@@ -779,6 +840,52 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             return await self._async_start_mcp_oauth()
         return await super().async_step_pick_implementation(user_input)
 
+    @override
+    async def async_step_auth(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Start OAuth and bound the wait for its browser callback."""
+        if user_input is not None:
+            self._cancel_mcp_oauth_timeout()
+        result = await super().async_step_auth(user_input)
+        if user_input is None and result["type"] == FlowResultType.EXTERNAL_STEP:
+            self._schedule_mcp_oauth_timeout()
+        return result
+
+    def _schedule_mcp_oauth_timeout(self) -> None:
+        """Start a new callback timeout for the current OAuth attempt."""
+        self._cancel_mcp_oauth_timeout()
+        if self._mcp_oauth_timeout == 0:
+            return
+        self._mcp_oauth_attempt += 1
+        attempt = self._mcp_oauth_attempt
+        self._mcp_oauth_timeout_task = self.hass.async_create_task(
+            self._async_handle_mcp_oauth_timeout(attempt),
+            "MCP OAuth callback timeout",
+        )
+
+    def _cancel_mcp_oauth_timeout(self) -> None:
+        """Cancel the outstanding callback timeout, if any."""
+        self._mcp_oauth_attempt += 1
+        task = self._mcp_oauth_timeout_task
+        self._mcp_oauth_timeout_task = None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+
+    async def _async_handle_mcp_oauth_timeout(self, attempt: int) -> None:
+        """Reject an external OAuth step whose callback never arrived."""
+        try:
+            await asyncio.sleep(self._mcp_oauth_timeout)
+            if attempt != self._mcp_oauth_attempt:
+                return
+            self._mcp_oauth_timeout_task = None
+            await self.hass.config_entries.flow.async_configure(
+                self.flow_id,
+                {"error": "timeout"},
+            )
+        except (asyncio.CancelledError, UnknownFlow):
+            return
+
     @property
     @override
     def extra_authorize_data(self) -> dict[str, str]:
@@ -793,6 +900,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
     @override
     async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:
         """Retain HA-managed OAuth data, then return to the service workflow."""
+        self._cancel_mcp_oauth_timeout()
         if self._mcp_oauth_data is None:
             return self.async_abort(reason="mcp_invalid_flow_state")
         oauth_data = {**self._mcp_oauth_data, **data}
@@ -831,9 +939,14 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Return a rejected OAuth authorization to the retained MCP draft."""
+        self._cancel_mcp_oauth_timeout()
         self._mcp_oauth_authenticated = False
         self._mcp_oauth_status = False
-        self._mcp_error_reason = MCP_ERROR_ACCESS_DENIED
+        self._mcp_error_reason = (
+            MCP_ERROR_OAUTH_TIMEOUT
+            if self.external_data.get("error") == "timeout"
+            else MCP_ERROR_ACCESS_DENIED
+        )
         return await self.async_step_service_menu()
 
     async def async_step_mcp_filter_tools(
@@ -1370,6 +1483,9 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         self._selected_service_type = SERVICE_TYPE_MCP
         self._mcp_config = service_config.server
         self._mcp_oauth_data = dict(entry.data)
+        self._mcp_oauth_timeout = float(
+            entry.data.get(CONF_MCP_OAUTH_TIMEOUT, DEFAULT_MCP_OAUTH_TIMEOUT)
+        )
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -1413,6 +1529,11 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             }
             self._mcp_service_config = service_config
             if service_config.server.use_oauth:
+                self._mcp_oauth_timeout = float(
+                    entry.data.get(
+                        CONF_MCP_OAUTH_TIMEOUT, DEFAULT_MCP_OAUTH_TIMEOUT
+                    )
+                )
                 self._mcp_oauth_data = {
                     key: entry.data[key]
                     for key in (
@@ -1461,8 +1582,10 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         if service_config is None:
             return None
         data = {**service_config.to_dict(), CONF_SERVICE_TYPE: SERVICE_TYPE_MCP}
-        if service_config.server.use_oauth and self._mcp_oauth_data is not None:
-            data.update(self._mcp_oauth_data)
+        if service_config.server.use_oauth:
+            data[CONF_MCP_OAUTH_TIMEOUT] = self._mcp_oauth_timeout
+            if self._mcp_oauth_data is not None:
+                data.update(self._mcp_oauth_data)
         return data
 
     def _mcp_oauth_auth(self) -> Any:

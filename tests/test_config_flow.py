@@ -31,11 +31,15 @@ from custom_components.extended_openai_conversation.const import (
     CONF_BASE_URL,
     CONF_CHAT_MODEL,
     CONF_FUNCTION_TOOLS,
+    CONF_MCP_OAUTH_ACTION,
+    CONF_MCP_OAUTH_TIMEOUT,
     CONF_PROMPT,
     CONF_SERVICE_TYPE,
     CONF_SKILLS,
     DEFAULT_CONF_BASE_URL,
     DOMAIN,
+    MCP_OAUTH_ACTION_PROCEED,
+    MCP_OAUTH_ACTION_RETURN,
     SERVICE_TYPE_AI_ENDPOINT,
     SERVICE_TYPE_MCP,
 )
@@ -68,6 +72,7 @@ from custom_components.extended_openai_conversation.mcp_client.mcp_const import 
     CONF_MCP_USE_OAUTH,
 )
 from homeassistant.const import CONF_API_KEY
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 
 
@@ -331,12 +336,22 @@ async def test_oauth_settings_confirm_discovers_metadata(hass):
 
     assert await flow.async_step_mcp_authenticate() == {"type": "form"}
     assert flow._mcp_error_reason is None
+    schema = flow.async_show_form.call_args.kwargs["data_schema"]
+    assert _schema_keys(schema.schema) == {
+        CONF_MCP_OAUTH_ACTION,
+        CONF_MCP_OAUTH_TIMEOUT,
+    }
     with patch(
         "custom_components.extended_openai_conversation.config_flow."
         "async_discover_mcp_oauth",
         new=AsyncMock(return_value=oauth_config),
     ) as discover_oauth:
-        result = await flow.async_step_mcp_authenticate({})
+        result = await flow.async_step_mcp_authenticate(
+            {
+                CONF_MCP_OAUTH_ACTION: MCP_OAUTH_ACTION_PROCEED,
+                CONF_MCP_OAUTH_TIMEOUT: 120,
+            }
+        )
 
     assert result == {"type": "external"}
     discover_oauth.assert_awaited_once_with("https://mcp.example.com/api")
@@ -346,6 +361,122 @@ async def test_oauth_settings_confirm_discovers_metadata(hass):
         == "https://auth.example.com/register"
     )
     flow._async_start_mcp_oauth.assert_awaited_once_with()
+
+
+async def test_oauth_settings_can_return_to_service_menu(hass):
+    """The OAuth settings action can leave without starting discovery."""
+    flow = _config_flow(hass)
+    flow._mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+        use_oauth=True,
+    )
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "async_discover_mcp_oauth",
+        new=AsyncMock(),
+    ) as discover_oauth:
+        result = await flow.async_step_mcp_authenticate(
+            {
+                CONF_MCP_OAUTH_ACTION: MCP_OAUTH_ACTION_RETURN,
+                CONF_MCP_OAUTH_TIMEOUT: 45,
+            }
+        )
+
+    assert result == {"type": "menu"}
+    assert flow._mcp_oauth_timeout == 45
+    discover_oauth.assert_not_awaited()
+    flow.async_step_service_menu.assert_awaited_once_with()
+    assert not flow._set_mcp_service_config(flow._mcp_policy_values())
+    assert flow._service_configuration()[CONF_MCP_OAUTH_TIMEOUT] == 45
+
+
+def test_zero_oauth_timeout_disables_timeout_task(hass):
+    """A zero callback timeout leaves Home Assistant's external step unlimited."""
+    flow = _config_flow(hass)
+    flow._mcp_oauth_timeout = 0
+
+    flow._schedule_mcp_oauth_timeout()
+
+    assert flow._mcp_oauth_timeout_task is None
+    hass.async_create_task.assert_not_called()
+
+
+async def test_external_oauth_step_schedules_callback_timeout(hass):
+    """Opening the authorization website starts one callback timeout task."""
+    flow = _config_flow(hass)
+    flow._mcp_oauth_timeout = 45
+    timeout_task = MagicMock()
+
+    def create_task(coroutine, name):
+        coroutine.close()
+        assert name == "MCP OAuth callback timeout"
+        return timeout_task
+
+    hass.async_create_task.side_effect = create_task
+    with patch(
+        "homeassistant.helpers.config_entry_oauth2_flow."
+        "AbstractOAuth2FlowHandler.async_step_auth",
+        new=AsyncMock(return_value={"type": FlowResultType.EXTERNAL_STEP}),
+    ):
+        result = await flow.async_step_auth()
+
+    assert result == {"type": FlowResultType.EXTERNAL_STEP}
+    assert flow._mcp_oauth_timeout_task is timeout_task
+
+
+async def test_oauth_callback_cancels_callback_timeout(hass):
+    """A browser callback cancels the pending timeout before it can fire."""
+    flow = _config_flow(hass)
+    timeout_task = MagicMock()
+    flow._mcp_oauth_timeout_task = timeout_task
+
+    with patch(
+        "homeassistant.helpers.config_entry_oauth2_flow."
+        "AbstractOAuth2FlowHandler.async_step_auth",
+        new=AsyncMock(return_value={"type": FlowResultType.EXTERNAL_STEP_DONE}),
+    ):
+        result = await flow.async_step_auth({"code": "authorization-code"})
+
+    assert result == {"type": FlowResultType.EXTERNAL_STEP_DONE}
+    timeout_task.cancel.assert_called_once_with()
+    assert flow._mcp_oauth_timeout_task is None
+
+
+async def test_oauth_timeout_rejects_current_external_step(hass):
+    """An expired callback timer resumes the external step with a timeout error."""
+    flow = _config_flow(hass)
+    flow.flow_id = "test-flow"
+    flow._mcp_oauth_timeout = 120
+    flow._mcp_oauth_attempt = 3
+    hass.config_entries.flow.async_configure = AsyncMock()
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow.asyncio.sleep",
+        new=AsyncMock(),
+    ) as sleep:
+        await flow._async_handle_mcp_oauth_timeout(3)
+
+    sleep.assert_awaited_once_with(120)
+    hass.config_entries.flow.async_configure.assert_awaited_once_with(
+        "test-flow", {"error": "timeout"}
+    )
+
+
+async def test_oauth_timeout_returns_to_menu_with_specific_error(hass):
+    """The synthetic timeout rejection retains a specific menu error."""
+    flow = _config_flow(hass)
+    flow.external_data = {"error": "timeout"}
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
+
+    result = await flow.async_step_authorize_rejected()
+
+    assert result == {"type": "menu"}
+    assert flow._mcp_oauth_status is False
+    assert flow._mcp_error_reason == "oauth_authorization_timeout"
 
 
 async def test_oauth_discovery_failure_is_retained_on_service_menu(hass):
@@ -379,7 +510,12 @@ async def test_oauth_discovery_failure_is_retained_on_service_menu(hass):
             ),
         ) as get_translations,
     ):
-        result = await flow.async_step_mcp_authenticate({})
+        result = await flow.async_step_mcp_authenticate(
+            {
+                CONF_MCP_OAUTH_ACTION: MCP_OAUTH_ACTION_PROCEED,
+                CONF_MCP_OAUTH_TIMEOUT: 120,
+            }
+        )
 
     assert result == {"type": "menu"}
     assert flow._mcp_oauth_status is False

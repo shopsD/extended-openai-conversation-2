@@ -61,7 +61,14 @@
       "mcp_authenticate": {
         "title": "OAuth settings",
         "description": "Authenticate with the MCP server using OAuth.",
-        "submit": "Start OAuth"
+        "data": {
+          "oauth_action": "Action",
+          "oauth_timeout": "OAuth callback timeout"
+        },
+        "data_description": {
+          "oauth_timeout": "Seconds to wait for the browser authorization callback. Set to 0 to disable the timeout."
+        },
+        "submit": "Continue"
       },
       "credentials_choice": {
         "title": "Choose OAuth credentials",
@@ -165,12 +172,15 @@
       "duplicate_server_id": "Another MCP service already uses this server ID.",
       "invalid_headers": "HTTP header names and values must be valid strings.",
       "invalid_oauth_setting": "Choose whether this server uses OAuth.",
+      "invalid_oauth_action": "Select whether to proceed with OAuth or return to the main menu.",
+      "invalid_oauth_timeout": "Enter an OAuth callback timeout of zero or more seconds.",
       "access_denied": "Access was denied by the server.",
       "authentication_failed": "Authentication failed. The server rejected the supplied credentials.",
       "invalid_mcp_response": "The server returned an invalid MCP response.",
       "mcp_server_error": "The MCP server reported an internal server error.",
       "mcp_server_not_found": "The MCP server was not found at the configured URL.",
       "oauth_discovery_failed": "Failed to discover OAuth settings from the configured server URL.",
+      "oauth_authorization_timeout": "OAuth authorization did not return before the configured timeout.",
       "unknown_mcp_error": "An unexpected error occurred while communicating with the MCP server.",
       "invalid_client_id": "Enter the OAuth client ID.",
       "oauth_credentials_unavailable": "Home Assistant saved the credentials but could not retrieve them for this authorization server.",
@@ -205,6 +215,12 @@
       "options": {
         "selected": "Selected",
         "unselected": "Unselected"
+      }
+    },
+    "mcp_oauth_action": {
+      "options": {
+        "proceed": "Proceed with OAuth",
+        "return": "Return to Configure Service"
       }
     }
   },
