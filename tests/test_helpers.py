@@ -2,6 +2,7 @@
 
 import json
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import httpx2
 from openai import AsyncOpenAI, BadRequestError
@@ -9,6 +10,7 @@ import pytest
 
 from custom_components.extended_openai_conversation.helpers import (
     async_create_chat_completion,
+    get_authenticated_client,
     get_model_config,
 )
 
@@ -101,6 +103,28 @@ def _kwargs(**params) -> dict:
         "messages": [{"role": "user", "content": "hi"}],
         **params,
     }
+
+
+async def test_skip_authentication_returns_client_without_validation(hass):
+    """The client helper preserves its original skip-authentication contract."""
+    client = MagicMock()
+
+    with patch(
+        "custom_components.extended_openai_conversation.helpers.AsyncOpenAI",
+        return_value=client,
+    ):
+        result = await get_authenticated_client(
+            hass=hass,
+            api_key="unused",
+            base_url="https://missing.example.com/v1",
+            api_version=None,
+            organization=None,
+            api_provider="openai",
+            skip_authentication=True,
+        )
+
+    assert result is client
+    client.models.list.assert_not_called()
 
 
 @pytest.mark.parametrize(

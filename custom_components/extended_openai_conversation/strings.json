@@ -10,7 +10,7 @@
       },
       "service_menu": {
         "title": "Configure service",
-        "description": "Complete the available steps. Options appear when their prerequisites are valid.\n\nConfiguration valid: {configuration_status}\n\nConnection succeeded: {connection_status}\n\nOAuth completed: {oauth_status}\n\nMCP settings valid: {settings_status}\n\nReview completed: {review_status}\n\n**Last error: {error_message}**",
+        "description": "Complete the available steps. Options appear when their prerequisites are valid.\n\n{status_lines}",
         "menu_options": {
           "switch_to_ai_endpoint": "Switch to Configure AI Endpoint",
           "switch_to_mcp": "Switch to Configure MCP Server",
@@ -21,6 +21,18 @@
           "service_review": "Review Settings",
           "service_save": "Save"
         }
+      },
+      "service_menu_connection": {
+        "description": "Connection succeeded: {status}"
+      },
+      "service_menu_oauth": {
+        "description": "OAuth completed: {status}"
+      },
+      "service_menu_filters": {
+        "description": "Filters configured: {status}"
+      },
+      "service_menu_error": {
+        "description": "**Last error: {error}**"
       },
       "ai_endpoint": {
         "title": "Add AI endpoint",

@@ -10,7 +10,7 @@ import types
 from typing import Any, override
 
 import httpx
-from openai._exceptions import APIConnectionError, AuthenticationError
+from openai._exceptions import APIConnectionError, APIStatusError, AuthenticationError
 import probatio as vol
 import yaml
 
@@ -121,7 +121,12 @@ from .const import (
     SERVICE_TYPE_MCP,
     SERVICE_TYPES,
 )
-from .helpers import get_authenticated_client, get_model_config, get_service_type
+from .helpers import (
+    async_check_openai_connection,
+    get_authenticated_client,
+    get_model_config,
+    get_service_type,
+)
 from .mcp_client import (
     CONF_MCP_AUTHORIZATION_URL,
     CONF_MCP_DESCRIPTION,
@@ -326,7 +331,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     if api_provider == "azure" and not base_url:
         raise HomeAssistantError("Azure OpenAI requires a custom base URL.")
 
-    await get_authenticated_client(
+    client = await get_authenticated_client(
         hass=hass,
         api_key=api_key,
         base_url=base_url,
@@ -335,6 +340,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
         api_provider=api_provider,
         skip_authentication=skip_authentication,
     )
+    if skip_authentication:
+        await async_check_openai_connection(hass, client)
 
 
 class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
@@ -363,6 +370,8 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         self._mcp_error_reason: str | None = None
         self._selected_service_type: str | None = None
         self._ai_endpoint_data: dict[str, Any] | None = None
+        self._ai_connection_status: bool | None = None
+        self._ai_error_reason: str | None = None
         self._draft_revision: int = 0
         self._reviewed_revision: int | None = None
         self._reconfigure_entry: ConfigEntry | None = None
@@ -404,66 +413,79 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         else:
             if allow_type_switch:
                 options.append("switch_to_mcp")
-            options.append("ai_endpoint")
+            else:
+                options.append("ai_endpoint")
 
         service_configuration = self._service_configuration()
+        is_mcp = self._selected_service_type == SERVICE_TYPE_MCP
+        if is_mcp:
+            if service_configuration is not None:
+                options.append("service_review")
         if service_configuration is not None:
-            options.append("service_review")
-        if (
-            service_configuration is not None
-            and self._reviewed_revision == self._draft_revision
-        ):
             options.append("service_save")
 
-        is_mcp = self._selected_service_type == SERVICE_TYPE_MCP
-        configuration_valid = (
-            self._mcp_config is not None
-            if is_mcp
-            else self._ai_endpoint_data is not None
-        )
         connection_status = (
-            self._mcp_connection_status
-            if is_mcp
-            else (True if configuration_valid else None)
+            self._mcp_connection_status if is_mcp else self._ai_connection_status
         )
         oauth_status = (
             self._mcp_oauth_status
             if is_mcp and self._mcp_config is not None and self._mcp_config.use_oauth
             else None
         )
-        settings_status = self._mcp_service_config is not None if is_mcp else None
-        review_status = (
-            self._reviewed_revision == self._draft_revision
-            if service_configuration is not None
-            else None
+        filters_status = self._mcp_service_config is not None if is_mcp else None
+        status_lines = await self._async_service_menu_status_lines(
+            is_mcp=is_mcp,
+            connection_status=connection_status,
+            oauth_status=oauth_status,
+            filters_status=filters_status,
         )
-        error_message = "—"
-        if is_mcp and self._mcp_error_reason is not None:
-            translations = await async_get_translations(
-                self.hass,
-                self.hass.config.language,
-                "config",
-                integrations={DOMAIN},
-            )
-            translation_key = (
-                f"component.{DOMAIN}.config.error.{self._mcp_error_reason}"
-            )
-            error_message = translations.get(
-                translation_key, self._mcp_error_reason
-            )
 
         return self.async_show_menu(
             step_id="service_menu",
             menu_options=options,
-            description_placeholders={
-                "configuration_status": self._status_icon(configuration_valid),
-                "connection_status": self._status_icon(connection_status),
-                "oauth_status": self._status_icon(oauth_status),
-                "settings_status": self._status_icon(settings_status),
-                "review_status": self._status_icon(review_status),
-                "error_message": error_message,
-            },
+            description_placeholders={"status_lines": status_lines},
         )
+
+    async def _async_service_menu_status_lines(
+        self,
+        *,
+        is_mcp: bool,
+        connection_status: bool | None,
+        oauth_status: bool | None,
+        filters_status: bool | None,
+    ) -> str:
+        """Build only the localized status rows relevant to this service."""
+        translations = await async_get_translations(
+            self.hass,
+            self.hass.config.language,
+            "config",
+            integrations={DOMAIN},
+        )
+
+        def status_line(key: str, status: bool | None) -> str:
+            translation_key = (
+                f"component.{DOMAIN}.config.step.service_menu_{key}.description"
+            )
+            template = translations.get(translation_key, "{status}")
+            return template.format(status=self._status_icon(status))
+
+        lines: list[str] = []
+        lines.append(status_line("connection", connection_status))
+        if oauth_status is not None:
+            lines.append(status_line("oauth", oauth_status))
+        if filters_status is not None:
+            lines.append(status_line("filters", filters_status))
+        error_reason = self._mcp_error_reason if is_mcp else self._ai_error_reason
+        if error_reason is not None:
+            error_key = f"component.{DOMAIN}.config.error.{error_reason}"
+            error = translations.get(error_key, error_reason)
+            translation_key = (
+                f"component.{DOMAIN}.config.step.service_menu_error.description"
+            )
+            error_template = translations.get(translation_key, "**{error}**")
+            lines.append(error_template.format(error=error))
+
+        return "\n\n".join(lines)
 
     async def async_step_switch_to_ai_endpoint(
         self, user_input: dict[str, Any] | None = None
@@ -487,21 +509,30 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         errors = {}
 
         if user_input is not None:
+            error_reason: str | None = None
             try:
                 await validate_input(self.hass, user_input)
             except APIConnectionError:
-                errors["base"] = "cannot_connect"
+                error_reason = "cannot_connect"
             except AuthenticationError:
-                errors["base"] = "invalid_auth"
+                error_reason = "invalid_auth"
+            except APIStatusError:
+                error_reason = "cannot_connect"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
+                error_reason = "unknown"
+
+            if error_reason is None or user_input.get(
+                CONF_SKIP_AUTHENTICATION, False
+            ):
                 data = {**user_input, CONF_SERVICE_TYPE: SERVICE_TYPE_AI_ENDPOINT}
+                self._ai_connection_status = error_reason is None
+                self._ai_error_reason = error_reason
                 if data != self._ai_endpoint_data:
                     self._ai_endpoint_data = data
                     self._mark_draft_changed()
                 return await self.async_step_service_menu()
+            errors["base"] = error_reason
 
         schema = self.add_suggested_values_to_schema(
             STEP_AI_ENDPOINT_DATA_SCHEMA, self._ai_endpoint_data or {}
@@ -1489,7 +1520,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
     ) -> ConfigFlowResult:
         """Persist a locally validated and reviewed service configuration."""
         data = self._service_configuration()
-        if data is None or self._reviewed_revision != self._draft_revision:
+        if data is None:
             return await self.async_step_service_menu()
 
         title = str(data.get(CONF_NAME, DEFAULT_NAME))
@@ -1597,6 +1628,20 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 self._mcp_oauth_from_entry = self._mcp_oauth_authenticated
         else:
             self._ai_endpoint_data = dict(entry.data)
+            try:
+                await validate_input(self.hass, dict(self._ai_endpoint_data))
+            except AuthenticationError:
+                self._ai_connection_status = False
+                self._ai_error_reason = "invalid_auth"
+            except (APIConnectionError, APIStatusError):
+                self._ai_connection_status = False
+                self._ai_error_reason = "cannot_connect"
+            except Exception:  # pylint: disable=broad-except
+                self._ai_connection_status = False
+                self._ai_error_reason = "unknown"
+            else:
+                self._ai_connection_status = True
+                self._ai_error_reason = None
         self._draft_revision = 1
         self._reviewed_revision = None
         if (

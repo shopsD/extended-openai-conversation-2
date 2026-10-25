@@ -13,6 +13,7 @@ doesn't behave like the real flow manager.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+from openai import APIConnectionError, APIStatusError, AuthenticationError
 import pytest
 
 from custom_components.extended_openai_conversation.config_flow import (
@@ -39,6 +40,7 @@ from custom_components.extended_openai_conversation.const import (
     CONF_PROMPT,
     CONF_SERVICE_TYPE,
     CONF_SKILLS,
+    CONF_SKIP_AUTHENTICATION,
     DEFAULT_CONF_BASE_URL,
     DOMAIN,
     MCP_OAUTH_ACTION_PROCEED,
@@ -92,6 +94,7 @@ def _config_flow(hass) -> ExtendedOpenAIConversationConfigFlow:
     flow = ExtendedOpenAIConversationConfigFlow()
     flow.hass = hass
     hass.config_entries.async_entries.return_value = []
+    flow._async_service_menu_status_lines = AsyncMock(return_value="status")
     return flow
 
 
@@ -135,8 +138,8 @@ async def test_user_step_routes_to_mcp(hass):
     flow.async_step_mcp.assert_awaited_once_with()
 
 
-async def test_ai_endpoint_is_reviewed_before_it_is_saved(hass):
-    """A valid AI endpoint returns to the menu and only saves after review."""
+async def test_ai_endpoint_can_be_saved_without_review(hass):
+    """A valid AI endpoint returns to a menu where it can be saved directly."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_AI_ENDPOINT
     flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
@@ -158,7 +161,6 @@ async def test_ai_endpoint_is_reviewed_before_it_is_saved(hass):
         CONF_SERVICE_TYPE: SERVICE_TYPE_AI_ENDPOINT,
     }
 
-    await flow.async_step_service_review({})
     flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
     result = await flow.async_step_service_save()
 
@@ -246,14 +248,83 @@ async def test_service_menu_exposes_filtering_without_connecting(hass):
             "mcp_filter_tools",
         ],
         "description_placeholders": {
-            "configuration_status": "✅",
-            "connection_status": "—",
-            "oauth_status": "—",
-            "settings_status": "❌",
-            "review_status": "—",
-            "error_message": "—",
+            "status_lines": "status",
         },
     }
+
+
+async def test_ai_endpoint_menu_only_offers_switch_and_save(hass):
+    """A configured AI endpoint needs neither another configure step nor review."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_AI_ENDPOINT
+    flow._ai_endpoint_data = {
+        "name": "Local AI",
+        CONF_API_KEY: "test-key",
+        CONF_SERVICE_TYPE: SERVICE_TYPE_AI_ENDPOINT,
+    }
+    flow._ai_connection_status = True
+    flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+
+    await flow.async_step_service_menu()
+
+    assert flow.async_show_menu.call_args.kwargs["menu_options"] == [
+        "switch_to_mcp",
+        "service_save",
+    ]
+
+
+async def test_service_menu_status_lines_only_include_relevant_rows(hass):
+    """Optional OAuth and error rows are omitted instead of showing dashes."""
+    flow = ExtendedOpenAIConversationConfigFlow()
+    flow.hass = hass
+    translations = {
+        f"component.{DOMAIN}.config.step.service_menu_connection.description": (
+            "Connection succeeded: {status}"
+        ),
+        f"component.{DOMAIN}.config.step.service_menu_oauth.description": (
+            "OAuth completed: {status}"
+        ),
+        f"component.{DOMAIN}.config.step.service_menu_filters.description": (
+            "Filters configured: {status}"
+        ),
+        f"component.{DOMAIN}.config.step.service_menu_error.description": (
+            "**Last error: {error}**"
+        ),
+        f"component.{DOMAIN}.config.error.cannot_connect": "Failed to connect",
+    }
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "async_get_translations",
+        new=AsyncMock(return_value=translations),
+    ):
+        ai_lines = await flow._async_service_menu_status_lines(
+            is_mcp=False,
+            connection_status=True,
+            oauth_status=None,
+            filters_status=None,
+        )
+        flow._ai_error_reason = "cannot_connect"
+        failed_ai_lines = await flow._async_service_menu_status_lines(
+            is_mcp=False,
+            connection_status=False,
+            oauth_status=None,
+            filters_status=None,
+        )
+        flow._mcp_error_reason = MCP_ERROR_CANNOT_CONNECT
+        mcp_lines = await flow._async_service_menu_status_lines(
+            is_mcp=True,
+            connection_status=False,
+            oauth_status=None,
+            filters_status=True,
+        )
+
+    assert ai_lines == "Connection succeeded: ✅"
+    assert "Connection succeeded: ❌" in failed_ai_lines
+    assert "**Last error: Failed to connect**" in failed_ai_lines
+    assert "OAuth completed" not in mcp_lines
+    assert "Filters configured: ✅" in mcp_lines
+    assert "**Last error: Failed to connect**" in mcp_lines
 
 
 async def test_oauth_server_requires_authentication_before_filtering(hass):
@@ -498,23 +569,11 @@ async def test_oauth_discovery_failure_is_retained_on_service_menu(hass):
     flow.async_show_menu = MagicMock(return_value={"type": "menu"})
 
     error_text = "Failed to discover OAuth settings from the configured server URL."
-    with (
-        patch(
-            "custom_components.extended_openai_conversation.config_flow."
-            "async_discover_mcp_oauth",
-            new=AsyncMock(side_effect=MCPAuthenticationError("missing metadata")),
-        ),
-        patch(
-            "custom_components.extended_openai_conversation.config_flow."
-            "async_get_translations",
-            new=AsyncMock(
-                return_value={
-                    f"component.{DOMAIN}.config.error.oauth_discovery_failed": (
-                        error_text
-                    )
-                }
-            ),
-        ) as get_translations,
+    flow._async_service_menu_status_lines.return_value = error_text
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "async_discover_mcp_oauth",
+        new=AsyncMock(side_effect=MCPAuthenticationError("missing metadata")),
     ):
         result = await flow.async_step_mcp_authenticate(
             {
@@ -527,15 +586,9 @@ async def test_oauth_discovery_failure_is_retained_on_service_menu(hass):
     assert flow._mcp_oauth_status is False
     assert flow._mcp_error_reason == "oauth_discovery_failed"
     assert flow.async_show_menu.call_args.kwargs["step_id"] == "service_menu"
-    assert flow.async_show_menu.call_args.kwargs["description_placeholders"][
-        "error_message"
-    ] == error_text
-    get_translations.assert_awaited_once_with(
-        hass,
-        hass.config.language,
-        "config",
-        integrations={DOMAIN},
-    )
+    assert flow.async_show_menu.call_args.kwargs["description_placeholders"] == {
+        "status_lines": error_text
+    }
 
 
 @pytest.mark.parametrize(
@@ -717,8 +770,8 @@ async def test_oauth_credential_save_failure_returns_localized_form(hass):
     }
 
 
-async def test_service_menu_gates_review_and_save_by_draft_state(hass):
-    """Review requires valid policies, and Save requires the current review."""
+async def test_service_menu_offers_optional_review_and_immediate_save(hass):
+    """Valid MCP policies allow saving whether or not review has been opened."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
     flow._mcp_config = MCPServerConfig(
@@ -734,7 +787,7 @@ async def test_service_menu_gates_review_and_save_by_draft_state(hass):
 
     options = flow.async_show_menu.call_args.kwargs["menu_options"]
     assert "service_review" in options
-    assert "service_save" not in options
+    assert "service_save" in options
 
     flow._reviewed_revision = flow._draft_revision
     await flow.async_step_service_menu()
@@ -744,7 +797,7 @@ async def test_service_menu_gates_review_and_save_by_draft_state(hass):
     flow._mark_draft_changed()
     await flow.async_step_service_menu()
 
-    assert "service_save" not in flow.async_show_menu.call_args.kwargs["menu_options"]
+    assert "service_save" in flow.async_show_menu.call_args.kwargs["menu_options"]
 
 
 async def test_reconfigure_menu_keeps_existing_service_type(hass):
@@ -1290,6 +1343,33 @@ async def test_validate_input_calls_get_authenticated_client(hass):
     )
 
 
+async def test_validate_input_probes_connection_when_authentication_is_skipped(hass):
+    """The config flow still probes an endpoint when client auth checking is skipped."""
+    client = MagicMock()
+    with (
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "get_authenticated_client",
+            new=AsyncMock(return_value=client),
+        ),
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_check_openai_connection",
+            new=AsyncMock(),
+        ) as check_connection,
+    ):
+        await validate_input(
+            hass,
+            {
+                CONF_API_KEY: "unused",
+                CONF_BASE_URL: "https://local.example.com/v1",
+                CONF_SKIP_AUTHENTICATION: True,
+            },
+        )
+
+    check_connection.assert_awaited_once_with(hass, client)
+
+
 async def test_validate_input_clears_default_base_url(hass):
     """The default (OpenAI's own) base_url is popped rather than sent through,
     so future changes to OpenAI's own default URL don't require reconfiguring
@@ -1312,6 +1392,133 @@ async def test_validate_input_azure_without_base_url_raises(hass):
 
     with pytest.raises(HomeAssistantError, match="Azure OpenAI requires"):
         await validate_input(hass, data)
+
+
+async def test_ai_endpoint_http_error_does_not_report_success(hass):
+    """An HTTP error keeps the endpoint form open with a connection error."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_AI_ENDPOINT
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    response = httpx.Response(
+        404,
+        request=httpx.Request("GET", "https://missing.example.com/v1/models"),
+    )
+    error = APIStatusError("not found", response=response, body=None)
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow.validate_input",
+        new=AsyncMock(side_effect=error),
+    ):
+        await flow.async_step_ai_endpoint(
+            {
+                "name": "Missing",
+                CONF_API_KEY: "test-key",
+                CONF_BASE_URL: "https://missing.example.com/v1",
+            }
+        )
+
+    assert flow._ai_endpoint_data is None
+    assert flow.async_show_form.call_args.kwargs["errors"] == {
+        "base": "cannot_connect"
+    }
+
+
+async def test_ai_endpoint_authentication_error_is_reported(hass):
+    """Skip-auth exposes a 401 but allows the endpoint draft to be saved."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_AI_ENDPOINT
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+    response = httpx.Response(
+        401,
+        request=httpx.Request("GET", "https://local.example.com/v1/models"),
+    )
+    error = AuthenticationError("unauthorized", response=response, body=None)
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow.validate_input",
+        new=AsyncMock(side_effect=error),
+    ):
+        result = await flow.async_step_ai_endpoint(
+            {
+                "name": "Local AI",
+                CONF_API_KEY: "invalid",
+                CONF_BASE_URL: "https://local.example.com/v1",
+                CONF_SKIP_AUTHENTICATION: True,
+            }
+        )
+
+    assert result == {"type": "menu"}
+    assert flow._ai_connection_status is False
+    assert flow._ai_error_reason == "invalid_auth"
+    assert flow.async_show_menu.call_args.kwargs["menu_options"] == [
+        "switch_to_mcp",
+        "service_save",
+    ]
+
+
+async def test_authentication_error_blocks_when_skip_is_disabled(hass):
+    """The normal validation path still blocks an endpoint rejected with 401."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_AI_ENDPOINT
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    response = httpx.Response(
+        401,
+        request=httpx.Request("GET", "https://local.example.com/v1/models"),
+    )
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow.validate_input",
+        new=AsyncMock(
+            side_effect=AuthenticationError(
+                "unauthorized", response=response, body=None
+            )
+        ),
+    ):
+        await flow.async_step_ai_endpoint(
+            {
+                "name": "Local AI",
+                CONF_API_KEY: "invalid",
+                CONF_BASE_URL: "https://local.example.com/v1",
+                CONF_SKIP_AUTHENTICATION: False,
+            }
+        )
+
+    assert flow._ai_endpoint_data is None
+    assert flow.async_show_form.call_args.kwargs["errors"] == {
+        "base": "invalid_auth"
+    }
+
+
+async def test_skip_authentication_allows_saving_unreachable_endpoint(hass):
+    """Skip-auth makes connection failures visible but non-blocking."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_AI_ENDPOINT
+    flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow.validate_input",
+        new=AsyncMock(
+            side_effect=APIConnectionError(
+                request=httpx.Request(
+                    "GET", "https://missing.example.com/v1/models"
+                )
+            )
+        ),
+    ):
+        result = await flow.async_step_ai_endpoint(
+            {
+                "name": "Missing",
+                CONF_API_KEY: "unused",
+                CONF_BASE_URL: "https://missing.example.com/v1",
+                CONF_SKIP_AUTHENTICATION: True,
+            }
+        )
+
+    assert result == {"type": "menu"}
+    assert flow._ai_connection_status is False
+    assert flow._ai_error_reason == "cannot_connect"
+    assert "service_save" in flow.async_show_menu.call_args.kwargs["menu_options"]
 
 
 def test_openai_config_option_schema_includes_core_options():

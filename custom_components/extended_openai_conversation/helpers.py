@@ -175,13 +175,20 @@ async def get_authenticated_client(
     if skip_authentication:
         return client
 
+    await async_check_openai_connection(hass, client)
+    return client
+
+
+async def async_check_openai_connection(
+    hass: HomeAssistant, client: AsyncClient
+) -> None:
+    """Contact the OpenAI-compatible models endpoint."""
     response = await hass.async_add_executor_job(
         partial(client.models.list, timeout=10)
     )
 
     async for _ in response:
         break
-    return client
 
 
 def _remove_unsupported_param(
