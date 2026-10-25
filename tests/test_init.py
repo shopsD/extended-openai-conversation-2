@@ -11,12 +11,14 @@ from custom_components.extended_openai_conversation.const import (
     SERVICE_TYPE_MCP,
 )
 from custom_components.extended_openai_conversation.mcp_client import (
-    CONF_MCP_OAUTH_REDIRECT_URI,
+    CONF_MCP_AUTHORIZATION_URL,
     CONF_MCP_SERVER_ID,
     CONF_MCP_SERVER_URL,
+    CONF_MCP_TOKEN_URL,
     CONF_MCP_USE_OAUTH,
     MCPClient,
 )
+from homeassistant.const import CONF_TOKEN
 
 
 async def test_mcp_entry_does_not_create_openai_client(hass):
@@ -50,29 +52,44 @@ async def test_mcp_oauth_entry_injects_persisted_auth_provider(hass):
         CONF_MCP_SERVER_ID: "vault",
         CONF_MCP_SERVER_URL: "https://mcp.example.com/api",
         CONF_MCP_USE_OAUTH: True,
-        CONF_MCP_OAUTH_REDIRECT_URI: "https://ha.example.com/oauth/callback",
+        CONF_MCP_AUTHORIZATION_URL: "https://auth.example.com/authorize",
+        CONF_MCP_TOKEN_URL: "https://auth.example.com/token",
+        CONF_TOKEN: {"access_token": "access-token"},
     }
     entry.title = "Vault MCP"
     entry.add_update_listener.return_value = MagicMock()
-    storage = MagicMock()
     auth = MagicMock()
 
-    with (
-        patch(
-            "custom_components.extended_openai_conversation."
-            "async_load_mcp_oauth_storage",
-            new=AsyncMock(return_value=storage),
-        ) as load_storage,
-        patch(
-            "custom_components.extended_openai_conversation.create_mcp_oauth_provider",
-            return_value=auth,
-        ) as create_provider,
-    ):
+    with patch(
+        "custom_components.extended_openai_conversation.async_get_mcp_oauth_auth",
+        new=AsyncMock(return_value=auth),
+    ) as get_auth:
         assert await async_setup_entry(hass, entry)
 
-    load_storage.assert_awaited_once_with(hass, "vault", dict(entry.data))
-    create_provider.assert_called_once()
+    get_auth.assert_awaited_once_with(hass, entry)
     assert entry.runtime_data._auth is auth
+
+
+async def test_mcp_oauth_entry_without_token_still_loads(hass):
+    """A deliberately saved incomplete OAuth entry does not crash setup."""
+    entry = MagicMock()
+    entry.data = {
+        CONF_SERVICE_TYPE: SERVICE_TYPE_MCP,
+        CONF_MCP_SERVER_ID: "vault",
+        CONF_MCP_SERVER_URL: "https://mcp.example.com/api",
+        CONF_MCP_USE_OAUTH: True,
+    }
+    entry.title = "Vault MCP"
+    entry.add_update_listener.return_value = MagicMock()
+
+    with patch(
+        "custom_components.extended_openai_conversation.async_get_mcp_oauth_auth",
+        new=AsyncMock(),
+    ) as get_auth:
+        assert await async_setup_entry(hass, entry)
+
+    get_auth.assert_not_awaited()
+    assert entry.runtime_data._auth is None
 
 
 async def test_mcp_entry_unloads_without_ai_platforms(hass):

@@ -16,9 +16,8 @@
           "switch_to_mcp": "Switch to Configure MCP Server",
           "ai_endpoint": "Configure AI Endpoint",
           "mcp": "Configure MCP Server",
-          "mcp_authenticate": "Authenticate MCP Server",
-          "mcp_perform_discovery": "Discover MCP Tools",
-          "mcp_skip_discovery": "Skip Discovery",
+          "mcp_authenticate": "OAuth Settings",
+          "mcp_filter_tools": "Filter Tools",
           "service_review": "Review Settings",
           "service_save": "Save"
         }
@@ -44,18 +43,47 @@
           "description": "Description",
           "url": "Server URL",
           "headers": "HTTP headers",
-          "use_oauth": "Server uses OAuth"
+          "use_oauth": "Server uses OAuth",
+          "perform_tool_discovery": "Perform initial tool discovery",
+          "provide_default_prompt": "Provide default MCP prompt",
+          "on_demand_discovery": "Enable on-demand discovery"
         },
         "data_description": {
           "server_id": "A short, unique ID used by conversation-agent function configuration.",
           "description": "Optional model-visible description of the server's purpose.",
           "headers": "Enter a YAML or JSON object of header names and string values. Example: Authorization: \"Bearer token\". Do not include an outer headers key. Quote numeric, boolean, or null-like values so they remain strings.",
-          "use_oauth": "Use the MCP OAuth authorization flow instead of supplying a static bearer token. After saving this page, select Authenticate MCP Server from the workflow menu."
+          "use_oauth": "Use Home Assistant's OAuth and Application Credentials support instead of static authentication headers.",
+          "perform_tool_discovery": "Connect and cache the server's current tool catalogue when this page is submitted. Disable this to perform only a connection check.\nDisabling this will prevent configuring permanent tools and disabling tools will be limited to Regular Expressions only",
+          "provide_default_prompt": "Automatically tell the model how to use list_servers, list_tools, and execute_tool.\nLeaving this blank will require the instructions added to the AI Endpoint prompt manually",
+          "on_demand_discovery": "Allow the model to discover non-permanent tools during conversations."
         }
       },
       "mcp_authenticate": {
-        "title": "Authenticate MCP server",
-        "description": "A browser window will open so the MCP server's authorization provider can authenticate you. Home Assistant does not receive your username or password."
+        "title": "OAuth settings",
+        "description": "Authenticate with the MCP server using OAuth.",
+        "submit": "Start OAuth"
+      },
+      "mcp_filter_tools": {
+        "title": "Filter MCP tools",
+        "description": "Apply filters on what tools to expose.\n{tool_count} Tools have been discovered\nPermanent tools are supplied to the AI agent on every request. Disabled tools are made unavailable to the AI agent when it performs tool discovery",
+        "data": {
+          "permanent_tool_mode": "Permanent tool selection behavior",
+          "permanent_tools": "Permanent tool selection",
+          "include_permanent_schemas": "Include permanent tool schemas",
+          "disabled_tool_mode": "Disabled tool selection behavior",
+          "disabled_tools": "Disabled tool selection",
+          "tool_name_pattern": "Tool-name regular expression",
+          "regex_timeout": "Regular-expression timeout"
+        },
+        "data_description": {
+          "permanent_tool_mode": "Selected includes only the tools selected below. Unselected includes every discovered tool except those selected below.",
+          "permanent_tools": "Tools used by the permanent selection behavior.",
+          "include_permanent_schemas": "Include input schemas in the permanent context supplied on every request.",
+          "disabled_tool_mode": "Selected disables the tools selected below. Unselected disables every discovered tool except those selected below.",
+          "disabled_tools": "The list of tools that are available to the AI when performing on-demand tool discovery.",
+          "tool_name_pattern": "Full match regular expression to filter tools during on-demand discovery. Any tools that match this regex will be unavailable and hidden from the AI agent during on demand discovery. Leave empty for no regular-expression restriction.",
+          "regex_timeout": "Maximum seconds allowed for each hard-filter regular-expression match before it returns no results."
+        }
       },
       "mcp_ask_discovery": {
         "title": "MCP tool discovery",
@@ -102,7 +130,7 @@
       },
       "mcp_review": {
         "title": "Review MCP context",
-        "description": "Permanent Tools: {permanent_exposure}\n\nSelected permanent tools: {selected_tool_count}\n\nSchemas included: {schemas_included}\n\nOn-demand discovery: {on_demand_discovery}\n\nRegular-expression timeout: {regex_timeout} seconds\n\nPermanent context size: {character_count} characters ({byte_count} bytes)\n\nEstimated context cost per request: approximately {estimated_tokens} tokens",
+        "description": "Connection: {connection_status}\n\nInitial discovery: {discovery_status}\n\nPermanent selection: {permanent_exposure}\n\nResolved permanent tools: {selected_tool_count}\n\nSchemas included: {schemas_included}\n\nDefault MCP prompt: {default_prompt}\n\nOn-demand discovery: {on_demand_discovery}\n\nDisabled tool policy: {disabled_tool_mode} ({disabled_tool_count} selected)\n\nTool-name regular expression: {tool_name_pattern}\n\nRegular-expression timeout: {regex_timeout} seconds\n\nPermanent context size: {character_count} characters ({byte_count} bytes)\n\nEstimated context cost per request: approximately {estimated_tokens} tokens",
         "submit": "Return to workflow"
       },
       "ai_endpoint_review": {
@@ -121,6 +149,8 @@
       "invalid_server_id": "Use lowercase letters, numbers, underscores, or hyphens; the ID must start with a letter or number.",
       "invalid_permanent_tools": "Select only tools advertised by this MCP server.",
       "invalid_regex_timeout": "Enter a regular-expression timeout greater than zero.",
+      "invalid_filter_mode": "Select a valid include/exclude behavior.",
+      "invalid_tool_name_pattern": "Enter a valid regular expression.",
       "mcp_discovery_required": "Discover the MCP server before selecting permanent tools.",
       "invalid_url": "Enter a valid HTTP or HTTPS URL.",
       "unknown": "[%key:common::config_flow::error::unknown%]",

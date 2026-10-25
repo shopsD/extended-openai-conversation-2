@@ -1,7 +1,5 @@
 """Tests for the extractable MCP client public API."""
 
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
-from pydantic import AnyUrl
 import pytest
 
 from custom_components.extended_openai_conversation.mcp_client import (
@@ -9,7 +7,6 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPConfigError,
     MCPContextEstimate,
     MCPDiscoveryResult,
-    MCPOAuthStorage,
     MCPServerConfig,
     MCPServerInformation,
     MCPServiceConfig,
@@ -52,28 +49,6 @@ def test_server_config_round_trips_oauth_selection():
     assert MCPServerConfig.from_dict(config.to_dict()) == config
 
 
-async def test_oauth_storage_round_trips_tokens_and_client_registration():
-    """OAuth persistence retains refresh and dynamic registration state."""
-    storage = MCPOAuthStorage(
-        tokens=OAuthToken(
-            access_token="access-token",
-            refresh_token="refresh-token",
-        ),
-        client_info=OAuthClientInformationFull(
-            client_id="client-id",
-            redirect_uris=[AnyUrl("https://ha.example.com/oauth/callback")],
-        ),
-        redirect_uri="https://ha.example.com/oauth/callback",
-    )
-
-    restored = MCPOAuthStorage.from_dict(storage.to_dict())
-
-    assert restored.is_authenticated
-    assert (await restored.get_tokens()).refresh_token == "refresh-token"
-    assert (await restored.get_client_info()).client_id == "client-id"
-    assert restored.redirect_uri == "https://ha.example.com/oauth/callback"
-
-
 def test_service_config_round_trips_complete_permanent_catalogue():
     """Persisted service data retains policies and complete tool snapshots."""
     tool = MCPTool(
@@ -95,7 +70,7 @@ def test_service_config_round_trips_complete_permanent_catalogue():
             description="Storage tools",
             headers={"Authorization": "Bearer token"},
         ),
-        permanent_tool_exposure=True,
+        permanent_tool_selection=("read_secret",),
         permanent_tools=(tool,),
         include_permanent_schemas=False,
         on_demand_discovery=True,
@@ -151,15 +126,72 @@ def test_service_config_selection_keeps_only_selected_tool_snapshots():
     config = MCPServiceConfig.from_selection(
         server,
         discovery,
-        permanent_tool_exposure=True,
+        perform_tool_discovery=True,
+        provide_default_prompt=True,
+        permanent_tool_mode="selected",
         selected_tool_names=["write_secret"],
         include_permanent_schemas=True,
         on_demand_discovery=True,
+        disabled_tool_mode="selected",
+        disabled_tool_names=[],
+        tool_name_pattern="",
         regex_timeout=0.1,
     )
 
     assert config.permanent_tools == (tools[1],)
     assert config.server_information is discovery.server
+
+
+def test_service_config_applies_hard_filters_before_permanent_selection():
+    """Disabled and full-name regex filters constrain permanent and on-demand tools."""
+    server = MCPServerConfig(
+        server_id="vault",
+        name="Vault MCP",
+        url="https://mcp.example.com/api",
+    )
+    tools = tuple(
+        MCPTool(
+            name=name,
+            title=None,
+            description=None,
+            input_schema={"type": "object"},
+            output_schema=None,
+            definition={"name": name},
+        )
+        for name in ("read_secret", "read_public", "write_secret")
+    )
+    discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=tools,
+    )
+
+    config = MCPServiceConfig.from_selection(
+        server,
+        discovery,
+        perform_tool_discovery=True,
+        provide_default_prompt=True,
+        permanent_tool_mode="unselected",
+        selected_tool_names=["read_public"],
+        include_permanent_schemas=False,
+        on_demand_discovery=True,
+        disabled_tool_mode="selected",
+        disabled_tool_names=["write_secret"],
+        tool_name_pattern=r"read_(secret|public)",
+        regex_timeout=0.1,
+    )
+
+    assert [tool.name for tool in config.permanent_tools] == ["read_secret"]
+    assert [tool.name for tool in config.filter_on_demand_tools(tools)] == [
+        "read_public"
+    ]
+    assert not config.tool_allowed("write_secret")
+    assert not config.tool_allowed("read_secret_extra_suffix")
 
 
 def test_service_config_selection_rejects_unknown_tool():
@@ -184,10 +216,15 @@ def test_service_config_selection_rejects_unknown_tool():
         MCPServiceConfig.from_selection(
             server,
             discovery,
-            permanent_tool_exposure=True,
+            perform_tool_discovery=True,
+            provide_default_prompt=True,
+            permanent_tool_mode="selected",
             selected_tool_names=["not_advertised"],
             include_permanent_schemas=True,
             on_demand_discovery=True,
+            disabled_tool_mode="selected",
+            disabled_tool_names=[],
+            tool_name_pattern="",
             regex_timeout=0.1,
         )
 
@@ -195,8 +232,8 @@ def test_service_config_selection_rejects_unknown_tool():
     assert err.value.code == "invalid_permanent_tools"
 
 
-def test_service_config_selection_clears_disabled_permanent_policy():
-    """Disabled permanent exposure discards selections and schema exposure."""
+def test_service_config_without_catalogue_has_no_permanent_tools():
+    """Skipped discovery supports on-demand regex policy without selectors."""
     config = MCPServiceConfig.from_selection(
         MCPServerConfig(
             server_id="vault",
@@ -204,10 +241,15 @@ def test_service_config_selection_clears_disabled_permanent_policy():
             url="https://mcp.example.com/api",
         ),
         None,
-        permanent_tool_exposure=False,
-        selected_tool_names=["ignored"],
+        perform_tool_discovery=False,
+        provide_default_prompt=True,
+        permanent_tool_mode="selected",
+        selected_tool_names=[],
         include_permanent_schemas=True,
         on_demand_discovery=True,
+        disabled_tool_mode="selected",
+        disabled_tool_names=[],
+        tool_name_pattern="read_.*",
         regex_timeout=0.1,
     )
 

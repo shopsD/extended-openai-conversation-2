@@ -9,7 +9,7 @@ from openai import AsyncClient
 from openai._exceptions import AuthenticationError, OpenAIError
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.const import CONF_API_KEY, Platform
+from homeassistant.const import CONF_API_KEY, CONF_TOKEN, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
@@ -54,7 +54,11 @@ async def async_setup_entry(
 
     if get_service_type(entry) == SERVICE_TYPE_MCP:
         config = MCPServerConfig.from_dict({**entry.data, "name": entry.title})
-        auth = await async_get_mcp_oauth_auth(hass, entry) if config.use_oauth else None
+        auth = (
+            await async_get_mcp_oauth_auth(hass, entry)
+            if config.use_oauth and CONF_TOKEN in entry.data
+            else None
+        )
         entry.runtime_data = MCPClient(config, auth=auth)
         entry.async_on_unload(entry.add_update_listener(update_listener))
         return True

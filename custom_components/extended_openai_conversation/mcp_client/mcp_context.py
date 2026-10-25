@@ -9,6 +9,13 @@ import math
 from .config import MCPServerConfig
 from .mcp_datatypes import MCPTool
 
+DEFAULT_MCP_PROMPT = (
+    "Use list_servers to find available MCP servers, list_tools to discover "
+    "tools, and execute_tool to run a tool. Use the server_id and tool name "
+    "returned by discovery. Tools already supplied in permanent context do not "
+    "need to be discovered again."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class MCPContextEstimate:
@@ -26,9 +33,10 @@ class MCPContextEstimate:
         tools: tuple[MCPTool, ...],
         *,
         include_schemas: bool,
+        include_default_prompt: bool = False,
     ) -> MCPContextEstimate:
         """Render permanent tool context and return its approximate token cost."""
-        if not tools:
+        if not tools and not include_default_prompt:
             return MCPContextEstimate(
                 content="",
                 selected_tool_count=0,
@@ -47,13 +55,17 @@ class MCPContextEstimate:
                 rendered_tool["input_schema"] = tool.input_schema
             rendered_tools.append(rendered_tool)
 
+        context: dict[str, object] = {
+            "server_id": config.server_id,
+            "server_name": config.name,
+            "server_description": config.description,
+            "tools": rendered_tools,
+        }
+        if include_default_prompt:
+            context["instructions"] = DEFAULT_MCP_PROMPT
+
         content = json.dumps(
-            {
-                "server_id": config.server_id,
-                "server_name": config.name,
-                "server_description": config.description,
-                "tools": rendered_tools,
-            },
+            context,
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,

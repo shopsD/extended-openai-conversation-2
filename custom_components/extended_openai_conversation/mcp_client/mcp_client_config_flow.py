@@ -8,7 +8,7 @@ from typing import Any
 
 from .config import MCPServerConfig
 from .mcp_client import MCPClient
-from .mcp_datatypes import MCPDiscoveryResult
+from .mcp_datatypes import MCPDiscoveryResult, MCPServerInformation
 from .mcp_errors import MCPConfigError
 from .mcp_utils import MCPUtils
 
@@ -92,3 +92,10 @@ class MCPClientConfigFlow:
         """Retrieve the server and tools catalogue."""
         async with MCPClient(config, auth=auth) as client:
             return await client.discover()
+
+    async def check_connection(
+        self, config: MCPServerConfig, *, auth: Any | None = None
+    ) -> MCPServerInformation:
+        """Initialize the server without retrieving its tool catalogue."""
+        async with MCPClient(config, auth=auth) as client:
+            return await client.check_connection()

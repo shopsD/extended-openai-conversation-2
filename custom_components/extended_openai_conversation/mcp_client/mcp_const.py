@@ -11,14 +11,30 @@ CONF_MCP_OAUTH_SCOPE = "scope"
 
 CONF_MCP_CATALOGUE_ID = "catalogue_id"
 CONF_MCP_SERVER_INFORMATION = "server_information"
+# Kept for loading older entries and integrations that imported the old name.
 CONF_MCP_PERMANENT_TOOL_EXPOSURE = "permanent_tool_exposure"
+CONF_MCP_PERFORM_TOOL_DISCOVERY = "perform_tool_discovery"
+CONF_MCP_PROVIDE_DEFAULT_PROMPT = "provide_default_prompt"
+CONF_MCP_PERMANENT_TOOL_MODE = "permanent_tool_mode"
 CONF_MCP_PERMANENT_TOOLS = "permanent_tools"
 CONF_MCP_PERMANENT_TOOL_CATALOGUE = "permanent_tool_catalogue"
 CONF_MCP_INCLUDE_PERMANENT_SCHEMAS = "include_permanent_schemas"
 CONF_MCP_ON_DEMAND_DISCOVERY = "on_demand_discovery"
+CONF_MCP_DISABLED_TOOL_MODE = "disabled_tool_mode"
+CONF_MCP_DISABLED_TOOLS = "disabled_tools"
+CONF_MCP_TOOL_NAME_PATTERN = "tool_name_pattern"
 CONF_MCP_REGEX_TIMEOUT = "regex_timeout"
 
+MCP_TOOL_FILTER_SELECTED = "selected"
+MCP_TOOL_FILTER_UNSELECTED = "unselected"
+
+DEFAULT_MCP_PERFORM_TOOL_DISCOVERY = True
+# Deprecated: permanent exposure is now represented by a selection mode.
 DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE = False
+DEFAULT_MCP_PROVIDE_DEFAULT_PROMPT = True
+DEFAULT_MCP_PERMANENT_TOOL_MODE = MCP_TOOL_FILTER_SELECTED
 DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS = False
 DEFAULT_MCP_ON_DEMAND_DISCOVERY = True
+DEFAULT_MCP_DISABLED_TOOL_MODE = MCP_TOOL_FILTER_SELECTED
+DEFAULT_MCP_TOOL_NAME_PATTERN = ""
 DEFAULT_MCP_REGEX_TIMEOUT = 0.1
