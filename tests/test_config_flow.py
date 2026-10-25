@@ -21,9 +21,11 @@ from custom_components.extended_openai_conversation.config_flow import (
     MCP_ERROR_CANNOT_CONNECT,
     MCP_ERROR_SERVER_ERROR,
     MCP_ERROR_SERVER_NOT_FOUND,
+    ExtendedOpenAIAITaskSubentryFlowHandler,
     ExtendedOpenAIConversationConfigFlow,
     ExtendedOpenAISubentryFlowHandler,
     _mcp_failure_reason,
+    _mcp_server_options,
     validate_input,
 )
 from custom_components.extended_openai_conversation.const import (
@@ -33,6 +35,7 @@ from custom_components.extended_openai_conversation.const import (
     CONF_FUNCTION_TOOLS,
     CONF_MCP_OAUTH_ACTION,
     CONF_MCP_OAUTH_TIMEOUT,
+    CONF_MCP_SERVERS,
     CONF_PROMPT,
     CONF_SERVICE_TYPE,
     CONF_SKILLS,
@@ -72,9 +75,11 @@ from custom_components.extended_openai_conversation.mcp_client.mcp_const import 
     CONF_MCP_TOOL_NAME_PATTERN,
     CONF_MCP_USE_OAUTH,
 )
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_API_KEY, CONF_TOKEN
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.selector import SelectOptionDict
 
 
 def _schema_keys(schema: dict) -> set[str]:
@@ -1316,13 +1321,18 @@ def test_openai_config_option_schema_includes_core_options():
     handler = ExtendedOpenAISubentryFlowHandler()
     handler.context = {"source": "user"}
 
-    schema = handler.openai_config_option_schema({}, skills=[{"name": "skill_a"}])
+    schema = handler.openai_config_option_schema(
+        {},
+        skills=[{"name": "skill_a"}],
+        mcp_servers=[SelectOptionDict(value="vault", label="Vault MCP")],
+    )
 
     keys = _schema_keys(schema)
     assert CONF_PROMPT in keys
     assert CONF_CHAT_MODEL in keys
     assert CONF_FUNCTION_TOOLS in keys
     assert CONF_SKILLS in keys
+    assert CONF_MCP_SERVERS in keys
 
 
 def test_openai_config_option_schema_omits_skills_field_when_none_available():
@@ -1363,3 +1373,64 @@ def test_openai_config_option_schema_preserves_existing_skills_on_reconfigure():
 
     skills_key = next(k for k in schema if getattr(k, "schema", k) == CONF_SKILLS)
     assert skills_key.default() == ["skill_a"]
+
+
+def test_mcp_server_options_use_stable_ids_and_entry_titles(hass):
+    """Agent selectors show configured MCP entries but store stable server IDs."""
+    mcp_entry = MagicMock()
+    mcp_entry.title = "Vault MCP"
+    mcp_entry.data = {
+        CONF_SERVICE_TYPE: SERVICE_TYPE_MCP,
+        CONF_MCP_SERVER_ID: "vault",
+    }
+    ai_entry = MagicMock()
+    ai_entry.title = "OpenAI"
+    ai_entry.data = {CONF_SERVICE_TYPE: SERVICE_TYPE_AI_ENDPOINT}
+    hass.config_entries.async_entries.return_value = [mcp_entry, ai_entry]
+
+    assert _mcp_server_options(hass) == [
+        {"value": "vault", "label": "Vault MCP"}
+    ]
+
+
+def test_openai_config_option_schema_preserves_existing_mcp_servers():
+    """Reconfiguring a conversation agent preserves its selected servers."""
+    handler = ExtendedOpenAISubentryFlowHandler()
+    handler.context = {"source": "reconfigure"}
+
+    schema = handler.openai_config_option_schema(
+        {CONF_MCP_SERVERS: ["vault"]},
+        mcp_servers=[SelectOptionDict(value="vault", label="Vault MCP")],
+    )
+
+    servers_key = next(
+        key for key in schema if getattr(key, "schema", key) == CONF_MCP_SERVERS
+    )
+    assert servers_key.default() == ["vault"]
+
+
+async def test_ai_task_schema_includes_mcp_servers(hass):
+    """AI Task agents can select from the same configured MCP services."""
+    handler = ExtendedOpenAIAITaskSubentryFlowHandler()
+    handler.hass = hass
+    handler.context = {"source": "reconfigure"}
+    handler.options = {CONF_MCP_SERVERS: ["vault"]}
+    entry = MagicMock()
+    entry.state = ConfigEntryState.LOADED
+    handler._get_entry = MagicMock(return_value=entry)
+    handler.async_show_form = MagicMock(return_value={"type": "form"})
+    mcp_entry = MagicMock()
+    mcp_entry.title = "Vault MCP"
+    mcp_entry.data = {
+        CONF_SERVICE_TYPE: SERVICE_TYPE_MCP,
+        CONF_MCP_SERVER_ID: "vault",
+    }
+    hass.config_entries.async_entries.return_value = [mcp_entry]
+
+    await handler.async_step_init()
+
+    schema = handler.async_show_form.call_args.kwargs["data_schema"].schema
+    servers_key = next(
+        key for key in schema if getattr(key, "schema", key) == CONF_MCP_SERVERS
+    )
+    assert servers_key.default() == ["vault"]

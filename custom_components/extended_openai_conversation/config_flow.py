@@ -78,6 +78,7 @@ from .const import (
     CONF_MAX_TOKENS,
     CONF_MCP_OAUTH_ACTION,
     CONF_MCP_OAUTH_TIMEOUT,
+    CONF_MCP_SERVERS,
     CONF_ORGANIZATION,
     CONF_PROMPT,
     CONF_REASONING_EFFORT,
@@ -290,6 +291,19 @@ DEFAULT_OPTIONS = types.MappingProxyType(
         CONF_ADVANCED_OPTIONS: DEFAULT_ADVANCED_OPTIONS,
     }
 )
+
+
+def _mcp_server_options(hass: HomeAssistant) -> list[SelectOptionDict]:
+    """Return configured MCP servers for agent selectors."""
+    return [
+        SelectOptionDict(
+            value=entry.data[CONF_MCP_SERVER_ID],
+            label=entry.title,
+        )
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if get_service_type(entry) == SERVICE_TYPE_MCP
+        and isinstance(entry.data.get(CONF_MCP_SERVER_ID), str)
+    ]
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
@@ -1777,7 +1791,11 @@ class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
                 data=user_input,
             )
 
-        schema = self.openai_config_option_schema(self.options, self._available_skills)
+        schema = self.openai_config_option_schema(
+            self.options,
+            self._available_skills,
+            _mcp_server_options(self.hass),
+        )
 
         if self._is_new:
             schema = {
@@ -1910,7 +1928,10 @@ class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
         ]
 
     def openai_config_option_schema(
-        self, options: dict[str, Any], skills: list[dict[str, Any]] | None = None
+        self,
+        options: dict[str, Any],
+        skills: list[dict[str, Any]] | None = None,
+        mcp_servers: list[SelectOptionDict] | None = None,
     ) -> dict:
         """Return a schema for OpenAI completion options."""
         # If creating a new subentry and no skills in options, default to all loaded skills
@@ -1946,6 +1967,16 @@ class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
                         )
                         for skill in (skills or [])
                     ],
+                    mode=SelectSelectorMode.DROPDOWN,
+                    multiple=True,
+                )
+            ),
+            vol.Optional(
+                CONF_MCP_SERVERS,
+                default=options.get(CONF_MCP_SERVERS, []),
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=mcp_servers or [],
                     mode=SelectSelectorMode.DROPDOWN,
                     multiple=True,
                 )
@@ -2057,6 +2088,16 @@ class ExtendedOpenAIAITaskSubentryFlowHandler(ConfigSubentryFlow):
                     CONF_MAX_TOKENS,
                     default=DEFAULT_MAX_TOKENS,
                 ): int,
+                vol.Optional(
+                    CONF_MCP_SERVERS,
+                    default=self.options.get(CONF_MCP_SERVERS, []),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=_mcp_server_options(self.hass),
+                        mode=SelectSelectorMode.DROPDOWN,
+                        multiple=True,
+                    )
+                ),
                 vol.Optional(
                     CONF_ADVANCED_OPTIONS,
                     default=DEFAULT_ADVANCED_OPTIONS,
