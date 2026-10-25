@@ -13,8 +13,6 @@ CONF_MCP_OAUTH_REGISTRATION_URL = "oauth_registration_url"
 
 CONF_MCP_CATALOGUE_ID = "catalogue_id"
 CONF_MCP_SERVER_INFORMATION = "server_information"
-# Kept for loading older entries and integrations that imported the old name.
-CONF_MCP_PERMANENT_TOOL_EXPOSURE = "permanent_tool_exposure"
 CONF_MCP_PERFORM_TOOL_DISCOVERY = "perform_tool_discovery"
 CONF_MCP_PROVIDE_DEFAULT_PROMPT = "provide_default_prompt"
 CONF_MCP_PERMANENT_TOOL_MODE = "permanent_tool_mode"
@@ -31,8 +29,6 @@ MCP_TOOL_FILTER_SELECTED = "selected"
 MCP_TOOL_FILTER_UNSELECTED = "unselected"
 
 DEFAULT_MCP_PERFORM_TOOL_DISCOVERY = True
-# Deprecated: permanent exposure is now represented by a selection mode.
-DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE = False
 DEFAULT_MCP_PROVIDE_DEFAULT_PROMPT = True
 DEFAULT_MCP_PERMANENT_TOOL_MODE = MCP_TOOL_FILTER_SELECTED
 DEFAULT_MCP_INCLUDE_PERMANENT_SCHEMAS = False

@@ -1037,8 +1037,8 @@ async def test_filter_tools_without_catalogue_only_displays_regex_options(hass):
     }
 
 
-async def test_filter_submission_returns_to_menu_and_review_unlocks_save(hass):
-    """Tool settings return to the menu, then review unlocks Save."""
+async def test_filter_submission_can_be_reviewed_and_saved(hass):
+    """Saved tool settings can be reviewed before the MCP service is saved."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
     flow._mcp_config = MCPServerConfig(
@@ -1129,8 +1129,8 @@ async def test_filter_submission_returns_to_menu_and_review_unlocks_save(hass):
     )
 
 
-async def test_mcp_skip_configuration_can_be_reviewed_and_saved(hass):
-    """Skipped discovery can be reviewed and saved without permanent tools."""
+async def test_mcp_without_initial_discovery_can_be_reviewed_and_saved(hass):
+    """A service without initial discovery can be reviewed and saved."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
     flow._mcp_config = MCPServerConfig(
@@ -1164,7 +1164,7 @@ async def test_mcp_skip_configuration_can_be_reviewed_and_saved(hass):
     assert entry_data["permanent_tool_catalogue"] == []
 
 
-async def test_mcp_tools_rejects_tool_outside_discovered_catalogue(hass):
+async def test_mcp_filter_tools_rejects_tool_outside_discovered_catalogue(hass):
     """Crafted tool selections cannot escape the discovered catalogue."""
     flow = _config_flow(hass)
     flow._mcp_config = MCPServerConfig(

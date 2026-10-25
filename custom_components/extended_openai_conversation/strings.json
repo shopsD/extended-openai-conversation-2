@@ -125,49 +125,6 @@
           "regex_timeout": "Maximum seconds allowed for each hard-filter regular-expression match before it returns no results."
         }
       },
-      "mcp_ask_discovery": {
-        "title": "MCP tool discovery",
-        "description": "Choose whether to retrieve the tools currently advertised by the MCP server.",
-        "menu_options": {
-          "mcp_perform_discovery": "Discover tools",
-          "mcp_skip_discovery": "Skip discovery"
-        }
-      },
-      "mcp_perform_discovery": {
-        "title": "Discover MCP tools",
-        "description": "Connect to the MCP server and retrieve its advertised tools.",
-        "submit": "Discover Tools"
-      },
-      "mcp_tools": {
-        "title": "Discovered MCP tools",
-        "description": "Connected to {server_name} and discovered {tool_count} tools.",
-        "data": {
-          "permanent_tool_exposure": "Enable permanent tools",
-          "permanent_tools": "Permanent tools",
-          "include_permanent_schemas": "Include permanent tool schemas",
-          "on_demand_discovery": "Enable on-demand discovery",
-          "regex_timeout": "Regular-expression timeout"
-        },
-        "data_description": {
-          "permanent_tool_exposure": "Include selected tool metadata in the list of permanent tools.",
-          "permanent_tools": "Tools to expose by default in each. The agent will see these tools without having to perform discovery",
-          "include_permanent_schemas": "Include the input schemas of permanent tools.",
-          "on_demand_discovery": "Allow conversation agents to discover tools outside the permanent selection.",
-          "regex_timeout": "Maximum number of seconds allowed for the agent to perform each regular-expression match."
-        }
-      },
-      "mcp_options": {
-        "title": "Configure MCP tool access",
-        "description": "Tool discovery was skipped. Permanent tools can be selected after discovering or refreshing the catalogue.",
-        "data": {
-          "on_demand_discovery": "Enable on-demand discovery",
-          "regex_timeout": "Regular-expression timeout"
-        },
-        "data_description": {
-          "on_demand_discovery": "Allow conversation agents to discover tools after a catalogue is available.",
-          "regex_timeout": "Maximum number of seconds allowed for each regular-expression match."
-        }
-      },
       "mcp_review": {
         "title": "Review MCP context",
         "description": "Connection succeeded: {connection_status}\n\nInitial discovery succeeded: {discovery_status}\n\nDiscovered tools: {discovered_tool_count}\n\nPermanent selection uses selected tools: {permanent_tools_selected}\n\nResolved permanent tools: {selected_tool_count}\n\nSchemas included: {schemas_included}\n\nDefault MCP prompt: {default_prompt}\n\nOn-demand discovery: {on_demand_discovery}\n\nDisabled selection disables selected tools: {disabled_tools_selected}\n\nSelected disabled tools: {disabled_tool_count}\n\nTool-name regular expression: {tool_name_pattern}\n\nRegular-expression timeout: {regex_timeout} seconds\n\nPermanent context size: {character_count} characters ({byte_count} bytes)\n\nEstimated context cost per request: approximately {estimated_tokens} tokens",
