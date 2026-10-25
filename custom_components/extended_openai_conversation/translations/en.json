@@ -5,6 +5,17 @@
             "duplicate_server_id": "Another MCP service already uses this server ID.",
             "invalid_headers": "HTTP header names and values must be valid strings.",
             "invalid_oauth_setting": "Choose whether this server uses OAuth.",
+            "access_denied": "Access was denied by the server.",
+            "authentication_failed": "Authentication failed. The server rejected the supplied credentials.",
+            "invalid_mcp_response": "The server returned an invalid MCP response.",
+            "mcp_server_error": "The MCP server reported an internal server error.",
+            "mcp_server_not_found": "The MCP server was not found at the configured URL.",
+            "oauth_discovery_failed": "Failed to discover OAuth settings from the configured server URL.",
+            "unknown_mcp_error": "An unexpected error occurred while communicating with the MCP server.",
+            "invalid_client_id": "Enter the OAuth client ID.",
+            "oauth_credentials_unavailable": "Home Assistant saved the credentials but could not retrieve them for this authorization server.",
+            "oauth_credentials_save_failed": "Home Assistant could not save the OAuth application credentials.",
+            "oauth_registration_failed": "Automatic OAuth client registration failed. Enter pre-registered application credentials instead.",
             "invalid_auth": "Invalid authentication",
             "invalid_name": "Enter a name for the MCP service.",
             "invalid_server_id": "Use lowercase letters, numbers, underscores, or hyphens; the ID must start with a letter or number.",
@@ -32,7 +43,7 @@
             },
             "service_menu": {
                 "title": "Configure service",
-                "description": "Complete the available steps. Options appear when their prerequisites are valid.\n\nConfiguration valid: {configuration_status}\n\nConnection succeeded: {connection_status}\n\nOAuth completed: {oauth_status}\n\nMCP settings valid: {settings_status}\n\nReview completed: {review_status}",
+                "description": "Complete the available steps. Options appear when their prerequisites are valid.\n\nConfiguration valid: {configuration_status}\n\nConnection succeeded: {connection_status}\n\nOAuth completed: {oauth_status}\n\nMCP settings valid: {settings_status}\n\nReview completed: {review_status}\n\n**Last error: {error_message}**",
                 "menu_options": {
                     "switch_to_ai_endpoint": "Switch to Configure AI Endpoint",
                     "switch_to_mcp": "Switch to Configure MCP Server",
@@ -92,6 +103,19 @@
                     "pick_implementation": "Use existing credentials",
                     "new_credentials": "Add new credentials"
                 }
+            },
+            "mcp_credentials": {
+                "title": "MCP OAuth application credentials",
+                "description": "The authorization server does not have reusable credentials and could not register Home Assistant automatically. Enter a client registered with this redirect URI:\n\n`{redirect_uri}`",
+                "data": {
+                    "client_id": "Client ID",
+                    "client_secret": "Client secret",
+                    "name": "Credential name"
+                },
+                "data_description": {
+                    "client_secret": "Leave empty for a public PKCE client. The credentials are stored and managed by Home Assistant."
+                },
+                "submit": "Save and authorize"
             },
             "mcp_filter_tools": {
                 "title": "Filter MCP tools",

@@ -11,6 +11,8 @@ from .mcp_const import (
     CONF_MCP_DISABLED_TOOLS,
     CONF_MCP_HEADERS,
     CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    CONF_MCP_OAUTH_ISSUER,
+    CONF_MCP_OAUTH_REGISTRATION_URL,
     CONF_MCP_OAUTH_SCOPE,
     CONF_MCP_ON_DEMAND_DISCOVERY,
     CONF_MCP_PERFORM_TOOL_DISCOVERY,
@@ -53,7 +55,12 @@ from .mcp_errors import (
     MCPProtocolError,
 )
 from .mcp_utils import MCPUtils
-from .oauth import MCPOAuthConfiguration, async_discover_mcp_oauth
+from .oauth import (
+    MCPOAuthClientRegistration,
+    MCPOAuthConfiguration,
+    async_discover_mcp_oauth,
+    async_register_mcp_oauth_client,
+)
 from .service_config import MCPServiceConfig
 
 __all__ = [
@@ -64,6 +71,8 @@ __all__ = [
     "CONF_MCP_DISABLED_TOOL_MODE",
     "CONF_MCP_HEADERS",
     "CONF_MCP_INCLUDE_PERMANENT_SCHEMAS",
+    "CONF_MCP_OAUTH_ISSUER",
+    "CONF_MCP_OAUTH_REGISTRATION_URL",
     "CONF_MCP_OAUTH_SCOPE",
     "CONF_MCP_ON_DEMAND_DISCOVERY",
     "CONF_MCP_PERFORM_TOOL_DISCOVERY",
@@ -100,6 +109,7 @@ __all__ = [
     "MCPConfigError",
     "MCPContextEstimate",
     "MCPDiscoveryResult",
+    "MCPOAuthClientRegistration",
     "MCPOAuthConfiguration",
     "MCPProtocolError",
     "MCPServerConfig",
@@ -109,4 +119,5 @@ __all__ = [
     "MCPToolResult",
     "MCPUtils",
     "async_discover_mcp_oauth",
+    "async_register_mcp_oauth_client",
 ]

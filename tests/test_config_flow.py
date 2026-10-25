@@ -12,11 +12,18 @@ doesn't behave like the real flow manager.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from custom_components.extended_openai_conversation.config_flow import (
+    MCP_ERROR_ACCESS_DENIED,
+    MCP_ERROR_AUTHENTICATION_FAILED,
+    MCP_ERROR_CANNOT_CONNECT,
+    MCP_ERROR_SERVER_ERROR,
+    MCP_ERROR_SERVER_NOT_FOUND,
     ExtendedOpenAIConversationConfigFlow,
     ExtendedOpenAISubentryFlowHandler,
+    _mcp_failure_reason,
     validate_input,
 )
 from custom_components.extended_openai_conversation.const import (
@@ -28,11 +35,14 @@ from custom_components.extended_openai_conversation.const import (
     CONF_SERVICE_TYPE,
     CONF_SKILLS,
     DEFAULT_CONF_BASE_URL,
+    DOMAIN,
     SERVICE_TYPE_AI_ENDPOINT,
     SERVICE_TYPE_MCP,
 )
 from custom_components.extended_openai_conversation.mcp_client import (
+    MCPAuthenticationError,
     MCPDiscoveryResult,
+    MCPOAuthClientRegistration,
     MCPOAuthConfiguration,
     MCPServerConfig,
     MCPServerInformation,
@@ -44,6 +54,8 @@ from custom_components.extended_openai_conversation.mcp_client.mcp_const import 
     CONF_MCP_DISABLED_TOOLS,
     CONF_MCP_HEADERS,
     CONF_MCP_INCLUDE_PERMANENT_SCHEMAS,
+    CONF_MCP_OAUTH_ISSUER,
+    CONF_MCP_OAUTH_REGISTRATION_URL,
     CONF_MCP_ON_DEMAND_DISCOVERY,
     CONF_MCP_PERFORM_TOOL_DISCOVERY,
     CONF_MCP_PERMANENT_TOOL_MODE,
@@ -228,6 +240,7 @@ async def test_service_menu_exposes_filtering_without_connecting(hass):
             "oauth_status": "—",
             "settings_status": "❌",
             "review_status": "—",
+            "error_message": "—",
         },
     }
 
@@ -292,9 +305,7 @@ async def test_oauth_callback_completion_returns_to_service_menu(hass):
 
     assert result == {"type": "menu"}
     assert flow._mcp_oauth_authenticated
-    flow._async_test_mcp_server.assert_awaited_once_with(
-        run_requested_discovery=True
-    )
+    flow._async_test_mcp_server.assert_awaited_once_with(run_requested_discovery=True)
 
 
 async def test_oauth_settings_confirm_discovers_metadata(hass):
@@ -307,15 +318,19 @@ async def test_oauth_settings_confirm_discovers_metadata(hass):
         use_oauth=True,
     )
     flow.async_show_form = MagicMock(return_value={"type": "form"})
-    flow.async_step_credentials_choice = AsyncMock(return_value={"type": "menu"})
+    flow._async_start_mcp_oauth = AsyncMock(return_value={"type": "external"})
+    flow._mcp_error_reason = "oauth_discovery_failed"
     oauth_config = MCPOAuthConfiguration(
         authorization_url="https://auth.example.com/authorize",
         token_url="https://auth.example.com/token",
         scopes=("mcp",),
         resource="https://mcp.example.com/api",
+        issuer="https://auth.example.com/",
+        registration_url="https://auth.example.com/register",
     )
 
     assert await flow.async_step_mcp_authenticate() == {"type": "form"}
+    assert flow._mcp_error_reason is None
     with patch(
         "custom_components.extended_openai_conversation.config_flow."
         "async_discover_mcp_oauth",
@@ -323,9 +338,241 @@ async def test_oauth_settings_confirm_discovers_metadata(hass):
     ) as discover_oauth:
         result = await flow.async_step_mcp_authenticate({})
 
-    assert result == {"type": "menu"}
+    assert result == {"type": "external"}
     discover_oauth.assert_awaited_once_with("https://mcp.example.com/api")
-    flow.async_step_credentials_choice.assert_awaited_once_with()
+    assert flow._mcp_oauth_data[CONF_MCP_OAUTH_ISSUER] == "https://auth.example.com/"
+    assert (
+        flow._mcp_oauth_data[CONF_MCP_OAUTH_REGISTRATION_URL]
+        == "https://auth.example.com/register"
+    )
+    flow._async_start_mcp_oauth.assert_awaited_once_with()
+
+
+async def test_oauth_discovery_failure_is_retained_on_service_menu(hass):
+    """OAuth discovery failures remain visible after returning to the menu."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
+    flow._mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+        use_oauth=True,
+    )
+    flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+
+    error_text = "Failed to discover OAuth settings from the configured server URL."
+    with (
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_discover_mcp_oauth",
+            new=AsyncMock(side_effect=MCPAuthenticationError("missing metadata")),
+        ),
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_get_translations",
+            new=AsyncMock(
+                return_value={
+                    f"component.{DOMAIN}.config.error.oauth_discovery_failed": (
+                        error_text
+                    )
+                }
+            ),
+        ) as get_translations,
+    ):
+        result = await flow.async_step_mcp_authenticate({})
+
+    assert result == {"type": "menu"}
+    assert flow._mcp_oauth_status is False
+    assert flow._mcp_error_reason == "oauth_discovery_failed"
+    assert flow.async_show_menu.call_args.kwargs["step_id"] == "service_menu"
+    assert flow.async_show_menu.call_args.kwargs["description_placeholders"][
+        "error_message"
+    ] == error_text
+    get_translations.assert_awaited_once_with(
+        hass,
+        hass.config.language,
+        "config",
+        integrations={DOMAIN},
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (httpx.ConnectError("unreachable"), MCP_ERROR_CANNOT_CONNECT),
+        (401, MCP_ERROR_AUTHENTICATION_FAILED),
+        (403, MCP_ERROR_ACCESS_DENIED),
+        (404, MCP_ERROR_SERVER_NOT_FOUND),
+        (503, MCP_ERROR_SERVER_ERROR),
+    ],
+)
+def test_mcp_failure_reason_classifies_transport_errors(error, expected):
+    """Nested HTTP failures select a stable localized error key."""
+    if isinstance(error, int):
+        request = httpx.Request("GET", "https://mcp.example.com/api")
+        response = httpx.Response(error, request=request)
+        error = httpx.HTTPStatusError(
+            "request failed", request=request, response=response
+        )
+    nested = ExceptionGroup("MCP request failed", [error])
+
+    assert _mcp_failure_reason(nested, "unknown_mcp_error") == expected
+
+
+async def test_oauth_reuses_credentials_for_discovered_issuer(hass):
+    """A matching Application Credential starts authorization immediately."""
+    flow = _config_flow(hass)
+    flow._mcp_oauth_data = {
+        "authorization_url": "https://auth.example.com/authorize",
+        "token_url": "https://auth.example.com/token",
+        "url": "https://mcp.example.com/api",
+        CONF_MCP_OAUTH_ISSUER: "https://auth.example.com/",
+    }
+    implementation = MagicMock()
+    flow.async_step_auth = AsyncMock(return_value={"type": "external"})
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "async_get_implementations",
+        new=AsyncMock(return_value={"https://auth.example.com/": implementation}),
+    ):
+        result = await flow._async_start_mcp_oauth()
+
+    assert result == {"type": "external"}
+    assert flow.flow_impl is implementation
+    flow.async_step_auth.assert_awaited_once_with()
+
+
+async def test_oauth_dynamically_registers_and_imports_credentials(hass):
+    """An advertised registration endpoint creates reusable HA credentials."""
+    flow = _config_flow(hass)
+    flow._mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+        use_oauth=True,
+    )
+    flow._mcp_oauth_data = {
+        "authorization_url": "https://auth.example.com/authorize",
+        "token_url": "https://auth.example.com/token",
+        "scope": ["mcp"],
+        "url": "https://mcp.example.com/api",
+        CONF_MCP_OAUTH_ISSUER: "https://auth.example.com/",
+        CONF_MCP_OAUTH_REGISTRATION_URL: "https://auth.example.com/register",
+    }
+    registration = MCPOAuthClientRegistration("generated-client", "")
+    implementation = MagicMock()
+    flow.async_step_auth = AsyncMock(return_value={"type": "external"})
+
+    with (
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_get_implementations",
+            new=AsyncMock(
+                side_effect=[{}, {"https://auth.example.com/": implementation}]
+            ),
+        ),
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_register_mcp_oauth_client",
+            new=AsyncMock(return_value=registration),
+        ) as register_client,
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_import_client_credential",
+            new=AsyncMock(),
+        ) as import_credential,
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_get_redirect_uri",
+            return_value="https://ha.example.com/auth/external/callback",
+        ),
+    ):
+        result = await flow._async_start_mcp_oauth()
+
+    assert result == {"type": "external"}
+    register_client.assert_awaited_once()
+    imported = import_credential.await_args.args[2]
+    assert imported.client_id == "generated-client"
+    assert imported.name == "Vault MCP"
+    assert import_credential.await_args.kwargs["auth_domain"] == (
+        "https://auth.example.com/"
+    )
+    assert flow.flow_impl is implementation
+
+
+async def test_oauth_manual_credentials_are_imported_and_used(hass):
+    """Pre-registered client credentials are persisted before authorization."""
+    flow = _config_flow(hass)
+    flow._mcp_oauth_data = {
+        "authorization_url": "https://auth.example.com/authorize",
+        "token_url": "https://auth.example.com/token",
+        "url": "https://mcp.example.com/api",
+        CONF_MCP_OAUTH_ISSUER: "https://auth.example.com/",
+    }
+    implementation = MagicMock()
+    flow.async_step_auth = AsyncMock(return_value={"type": "external"})
+
+    with (
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_import_client_credential",
+            new=AsyncMock(),
+        ) as import_credential,
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_get_implementations",
+            new=AsyncMock(return_value={"https://auth.example.com/": implementation}),
+        ),
+    ):
+        result = await flow.async_step_mcp_credentials(
+            {
+                "client_id": "registered-client",
+                "client_secret": "secret",
+                "name": "Vault credential",
+            }
+        )
+
+    assert result == {"type": "external"}
+    imported = import_credential.await_args.args[2]
+    assert imported.client_id == "registered-client"
+    assert imported.client_secret == "secret"
+    assert imported.name == "Vault credential"
+    assert flow.flow_impl is implementation
+
+
+async def test_oauth_credential_save_failure_returns_localized_form(hass):
+    """Application Credential storage failures keep the OAuth draft available."""
+    flow = _config_flow(hass)
+    flow._mcp_oauth_data = {
+        "authorization_url": "https://auth.example.com/authorize",
+        "token_url": "https://auth.example.com/token",
+        "url": "https://mcp.example.com/api",
+        CONF_MCP_OAUTH_ISSUER: "https://auth.example.com/",
+    }
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+    with (
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_import_client_credential",
+            new=AsyncMock(side_effect=HomeAssistantError("storage unavailable")),
+        ),
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "async_get_redirect_uri",
+            return_value="https://ha.example.com/auth/external/callback",
+        ),
+    ):
+        result = await flow.async_step_mcp_credentials(
+            {"client_id": "registered-client", "client_secret": ""}
+        )
+
+    assert result == {"type": "form"}
+    assert flow.async_show_form.call_args.kwargs["step_id"] == "mcp_credentials"
+    assert flow.async_show_form.call_args.kwargs["errors"] == {
+        "base": "oauth_credentials_save_failed"
+    }
 
 
 async def test_service_menu_gates_review_and_save_by_draft_state(hass):
@@ -733,15 +980,18 @@ async def test_disabled_initial_discovery_only_checks_connection(hass):
     )
     flow._mcp_options = {CONF_MCP_PERFORM_TOOL_DISCOVERY: False}
 
-    with patch(
-        "custom_components.extended_openai_conversation.config_flow."
-        "MCPClientConfigFlow.discover",
-        new=AsyncMock(),
-    ) as mock_discover, patch(
-        "custom_components.extended_openai_conversation.config_flow."
-        "MCPClientConfigFlow.check_connection",
-        new=AsyncMock(),
-    ) as check_connection:
+    with (
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "MCPClientConfigFlow.discover",
+            new=AsyncMock(),
+        ) as mock_discover,
+        patch(
+            "custom_components.extended_openai_conversation.config_flow."
+            "MCPClientConfigFlow.check_connection",
+            new=AsyncMock(),
+        ) as check_connection,
+    ):
         await flow._async_test_mcp_server(run_requested_discovery=True)
 
     mock_discover.assert_not_awaited()
