@@ -780,7 +780,6 @@ async def test_service_menu_offers_optional_review_and_immediate_save(hass):
         url="https://mcp.example.com/api",
     )
     assert not flow._set_mcp_service_config(flow._mcp_policy_values())
-    flow._mark_draft_changed()
     flow.async_show_menu = MagicMock(return_value={"type": "menu"})
 
     await flow.async_step_service_menu()
@@ -788,16 +787,6 @@ async def test_service_menu_offers_optional_review_and_immediate_save(hass):
     options = flow.async_show_menu.call_args.kwargs["menu_options"]
     assert "service_review" in options
     assert "service_save" in options
-
-    flow._reviewed_revision = flow._draft_revision
-    await flow.async_step_service_menu()
-
-    assert "service_save" in flow.async_show_menu.call_args.kwargs["menu_options"]
-
-    flow._mark_draft_changed()
-    await flow.async_step_service_menu()
-
-    assert "service_save" in flow.async_show_menu.call_args.kwargs["menu_options"]
 
 
 async def test_reconfigure_menu_keeps_existing_service_type(hass):
@@ -1125,7 +1114,6 @@ async def test_filter_submission_returns_to_menu_and_review_unlocks_save(hass):
     result = await flow.async_step_mcp_review({})
 
     assert result == {"type": "menu"}
-    assert flow._reviewed_revision == flow._draft_revision
     flow.async_step_service_menu.assert_awaited_once_with()
 
     flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})

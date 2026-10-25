@@ -372,8 +372,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         self._ai_endpoint_data: dict[str, Any] | None = None
         self._ai_connection_status: bool | None = None
         self._ai_error_reason: str | None = None
-        self._draft_revision: int = 0
-        self._reviewed_revision: int | None = None
         self._reconfigure_entry: ConfigEntry | None = None
 
     async def async_step_user(
@@ -418,9 +416,8 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
 
         service_configuration = self._service_configuration()
         is_mcp = self._selected_service_type == SERVICE_TYPE_MCP
-        if is_mcp:
-            if service_configuration is not None:
-                options.append("service_review")
+        if is_mcp and service_configuration is not None:
+            options.append("service_review")
         if service_configuration is not None:
             options.append("service_save")
 
@@ -528,9 +525,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 data = {**user_input, CONF_SERVICE_TYPE: SERVICE_TYPE_AI_ENDPOINT}
                 self._ai_connection_status = error_reason is None
                 self._ai_error_reason = error_reason
-                if data != self._ai_endpoint_data:
-                    self._ai_endpoint_data = data
-                    self._mark_draft_changed()
+                self._ai_endpoint_data = data
                 return await self.async_step_service_menu()
             errors["base"] = error_reason
 
@@ -561,7 +556,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 self._mcp_options = None
                 self._mcp_service_config = None
                 self._mcp_error_reason = None
-                self._mark_draft_changed()
             if self._oauth_connection_changed(previous_config, result.config):
                 self._mcp_oauth_data = None
                 self._mcp_oauth_from_entry = False
@@ -977,7 +971,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         self._mcp_oauth_authenticated = True
         self._mcp_oauth_status = True
         self._mcp_error_reason = None
-        self._mark_draft_changed()
         await self._async_test_mcp_server(run_requested_discovery=True)
         self._set_mcp_service_config(self._mcp_policy_values())
         return await self.async_step_service_menu()
@@ -1024,11 +1017,8 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         errors: dict[str, str] = {}
         if user_input is not None:
             options = {**self._mcp_policy_values(), **user_input}
-            previous_config = self._mcp_service_config
             errors = self._set_mcp_service_config(options)
             if not errors:
-                if self._mcp_service_config != previous_config:
-                    self._mark_draft_changed()
                 return await self.async_step_service_menu()
 
         values = self._mcp_policy_values()
@@ -1235,7 +1225,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             self._mcp_service_config = None
             self._mcp_options = previous_options
             self._mcp_error_reason = None
-            self._mark_draft_changed()
             return await self.async_step_mcp_tools()
         finally:
             self._sync_mcp_oauth_token_from_entry()
@@ -1259,7 +1248,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
 
         errors: dict[str, str] = {}
         if user_input is not None:
-            previous_config = self._mcp_service_config
             options = {
                 CONF_MCP_PERMANENT_TOOL_EXPOSURE: DEFAULT_MCP_PERMANENT_TOOL_EXPOSURE,
                 CONF_MCP_PERMANENT_TOOLS: [],
@@ -1270,8 +1258,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             }
             errors = self._set_mcp_service_config(options)
             if not errors:
-                if self._mcp_service_config != previous_config:
-                    self._mark_draft_changed()
                 return await self.async_step_service_menu()
 
         values = self._mcp_options or {}
@@ -1341,7 +1327,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
 
         errors: dict[str, str] = {}
         if user_input is not None:
-            previous_config = self._mcp_service_config
             options = {
                 CONF_MCP_PERMANENT_TOOL_EXPOSURE: False,
                 CONF_MCP_PERMANENT_TOOLS: [],
@@ -1350,8 +1335,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             }
             errors = self._set_mcp_service_config(options)
             if not errors:
-                if self._mcp_service_config != previous_config:
-                    self._mark_draft_changed()
                 self._mcp_discovery_status = None
                 return await self.async_step_service_menu()
 
@@ -1433,7 +1416,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             return self.async_abort(reason="mcp_invalid_flow_state")
 
         if user_input is not None:
-            self._reviewed_revision = self._draft_revision
             return await self.async_step_service_menu()
 
         if service_config.server.use_oauth and not self._mcp_oauth_authenticated:
@@ -1496,7 +1478,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         if self._ai_endpoint_data is None:
             return await self.async_step_service_menu()
         if user_input is not None:
-            self._reviewed_revision = self._draft_revision
             return await self.async_step_service_menu()
         return self.async_show_form(
             step_id="ai_endpoint_review",
@@ -1642,8 +1623,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             else:
                 self._ai_connection_status = True
                 self._ai_error_reason = None
-        self._draft_revision = 1
-        self._reviewed_revision = None
         if (
             self._selected_service_type == SERVICE_TYPE_MCP
             and self._mcp_config is not None
@@ -1653,16 +1632,10 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         return await self.async_step_service_menu()
 
     def _select_service_type(self, service_type: str) -> None:
-        """Select a draft type and invalidate its previous review."""
+        """Select a draft service type."""
         if service_type != self._selected_service_type:
             self._selected_service_type = service_type
             self._mcp_error_reason = None
-            self._mark_draft_changed()
-
-    def _mark_draft_changed(self) -> None:
-        """Invalidate review whenever meaningful draft state changes."""
-        self._draft_revision += 1
-        self._reviewed_revision = None
 
     @staticmethod
     def _status_icon(status: bool | None) -> str:
