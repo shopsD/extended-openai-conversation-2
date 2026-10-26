@@ -1209,6 +1209,58 @@ async def test_mcp_filter_tools_rejects_tool_outside_discovered_catalogue(hass):
     }
 
 
+async def test_mcp_filter_tools_rejects_permanent_disabled_conflict(hass):
+    """The filter form flags tools selected for both policy sets."""
+    flow = _config_flow(hass)
+    flow._mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+    )
+    tool = MCPTool(
+        name="read_secret",
+        title="Read secret",
+        description="Read a stored secret.",
+        input_schema={"type": "object"},
+        output_schema=None,
+        definition={"name": "read_secret"},
+    )
+    flow._mcp_discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(tool,),
+    )
+    flow._mcp_options = {
+        CONF_MCP_PERFORM_TOOL_DISCOVERY: True,
+        CONF_MCP_PROVIDE_DEFAULT_PROMPT: True,
+        CONF_MCP_ON_DEMAND_DISCOVERY: True,
+    }
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+    result = await flow.async_step_mcp_filter_tools(
+        {
+            CONF_MCP_PERMANENT_TOOL_MODE: "selected",
+            CONF_MCP_PERMANENT_TOOLS: ["read_secret"],
+            CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: True,
+            CONF_MCP_DISABLED_TOOL_MODE: "selected",
+            CONF_MCP_DISABLED_TOOLS: ["read_secret"],
+            CONF_MCP_TOOL_NAME_PATTERN: "",
+            CONF_MCP_REGEX_TIMEOUT: 0.1,
+        }
+    )
+
+    assert result == {"type": "form"}
+    assert flow._mcp_service_config is None
+    assert flow.async_show_form.call_args.kwargs["errors"] == {
+        CONF_MCP_DISABLED_TOOLS: "permanent_disabled_tool_conflict"
+    }
+
+
 async def test_initial_discovery_failure_retains_server_draft(hass):
     """Failed discovery is informational and retains the server configuration."""
     flow = _config_flow(hass)

@@ -50,7 +50,7 @@ class MCPContextRenderer:
     def render_permanent_context(config: MCPServiceConfig) -> MCPRenderedContext:
         """Render stable model context without calculating display estimates."""
 
-        tools = config.filter_allowed_tools(config.permanent_tools)
+        tools = config.permanent_tools
         if not tools and not config.provide_default_prompt:
             return MCPRenderedContext(content="", selected_tool_count=0)
 

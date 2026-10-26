@@ -389,7 +389,7 @@ class MCPToolManager:
             (
                 tool
                 for tool in service.config.permanent_tools
-                if tool.name == tool_name and service.config.tool_allowed(tool.name)
+                if tool.name == tool_name
             ),
             None,
         )

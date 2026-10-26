@@ -132,14 +132,22 @@ class MCPServiceConfig:
             regex_timeout=regex_timeout,
             server_information=discovery.server if discovery is not None else None,
         )
-        allowed_tools: tuple[MCPTool, ...] = config.filter_allowed_tools(available_tools)
         permanent_tools: tuple[MCPTool, ...] = tuple(
             tool
-            for tool in allowed_tools
+            for tool in available_tools
             if config._selection_matches(
                 tool.name, config.permanent_tool_selection, config.permanent_tool_mode
             )
         )
+        disabled_tool_names = {
+            tool.name
+            for tool in available_tools
+            if config._selection_matches(
+                tool.name, config.disabled_tools, config.disabled_tool_mode
+            )
+        }
+        if disabled_tool_names & {tool.name for tool in permanent_tools}:
+            raise MCPConfigError("disabled_tools", "permanent_disabled_tool_conflict")
         return replace(config, permanent_tools=permanent_tools)
 
     @staticmethod
@@ -154,7 +162,7 @@ class MCPServiceConfig:
         return is_selected if mode == MCP_TOOL_FILTER_SELECTED else not is_selected
 
     def tool_allowed(self, tool_name: str) -> bool:
-        """Return whether a canonical tool name passes all hard filters."""
+        """Return whether a canonical tool name passes on-demand filters."""
         disabled: bool = self._selection_matches(
             tool_name, self.disabled_tools, self.disabled_tool_mode
         )

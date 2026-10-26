@@ -73,8 +73,8 @@ def _entity_for_stream() -> ExtendedOpenAIBaseLLMEntity:
     return entity
 
 
-def test_mcp_context_messages_use_assigned_saved_catalogue():
-    """Assigned MCP context is rendered from saved data without discovery."""
+def test_mcp_context_messages_use_complete_assigned_saved_catalogue():
+    """On-demand filters do not remove tools from permanent context."""
     entity = ExtendedOpenAIBaseLLMEntity.__new__(ExtendedOpenAIBaseLLMEntity)
     entity.hass = MagicMock()
     entity.subentry = MagicMock()
@@ -87,7 +87,7 @@ def test_mcp_context_messages_use_assigned_saved_catalogue():
         output_schema={"type": "object"},
         definition={"name": "read_secret"},
     )
-    disabled_tool = MCPTool(
+    on_demand_disabled_tool = MCPTool(
         name="delete_secret",
         title="Delete secret",
         description="Delete a stored secret.",
@@ -102,7 +102,7 @@ def test_mcp_context_messages_use_assigned_saved_catalogue():
             name="Vault MCP",
             url="https://vault.example.com/mcp",
         ),
-        permanent_tools=(tool, disabled_tool),
+        permanent_tools=(tool, on_demand_disabled_tool),
         include_permanent_schemas=True,
         provide_default_prompt=True,
         disabled_tools=("delete_secret",),
@@ -126,11 +126,16 @@ def test_mcp_context_messages_use_assigned_saved_catalogue():
     assert context["server_id"] == "vault"
     assert context["tools"] == [
         {
+            "description": "Delete a stored secret.",
+            "input_schema": {"type": "object"},
+            "name": "delete_secret",
+        },
+        {
             "description": "Read a stored secret.",
             "input_schema": {"type": "object"},
             "name": "read_secret",
             "output_schema": {"type": "object"},
-        }
+        },
     ]
     assert "permanent" not in context["instructions"]
 

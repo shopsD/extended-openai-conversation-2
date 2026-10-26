@@ -143,8 +143,8 @@ def test_service_config_selection_keeps_only_selected_tool_snapshots():
     assert config.server_information is discovery.server
 
 
-def test_service_config_applies_hard_filters_before_permanent_selection():
-    """Disabled and full-name regex filters constrain permanent and on-demand tools."""
+def test_service_config_applies_filters_only_to_on_demand_tools():
+    """Permanent tools bypass filters that constrain on-demand discovery."""
     server = MCPServerConfig(
         server_id="vault",
         name="Vault MCP",
@@ -177,22 +177,81 @@ def test_service_config_applies_hard_filters_before_permanent_selection():
         discovery,
         perform_tool_discovery=True,
         provide_default_prompt=True,
-        permanent_tool_mode="unselected",
-        selected_tool_names=["read_public"],
+        permanent_tool_mode="selected",
+        selected_tool_names=["write_secret"],
         include_permanent_schemas=False,
         on_demand_discovery=True,
         disabled_tool_mode="selected",
-        disabled_tool_names=["write_secret"],
+        disabled_tool_names=[],
         tool_name_pattern=r"read_(secret|public)",
         regex_timeout=0.1,
     )
 
-    assert [tool.name for tool in config.permanent_tools] == ["read_secret"]
+    assert [tool.name for tool in config.permanent_tools] == ["write_secret"]
     assert [tool.name for tool in config.filter_on_demand_tools(tools)] == [
-        "read_public"
+        "read_secret",
+        "read_public",
     ]
     assert not config.tool_allowed("write_secret")
     assert not config.tool_allowed("read_secret_extra_suffix")
+
+
+@pytest.mark.parametrize(
+    ("permanent_mode", "permanent_names", "disabled_mode", "disabled_names"),
+    [
+        ("selected", ["write_secret"], "selected", ["write_secret"]),
+        ("selected", ["write_secret"], "unselected", []),
+    ],
+)
+def test_service_config_rejects_permanent_disabled_tool_conflict(
+    permanent_mode: str,
+    permanent_names: list[str],
+    disabled_mode: str,
+    disabled_names: list[str],
+):
+    """Resolved permanent and disabled selections must not overlap."""
+    server = MCPServerConfig(
+        server_id="vault",
+        name="Vault MCP",
+        url="https://mcp.example.com/api",
+    )
+    tool = MCPTool(
+        name="write_secret",
+        title=None,
+        description=None,
+        input_schema={"type": "object"},
+        output_schema=None,
+        definition={"name": "write_secret"},
+    )
+    discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(tool,),
+    )
+
+    with pytest.raises(MCPConfigError) as err:
+        MCPServiceConfig.from_selection(
+            server,
+            discovery,
+            perform_tool_discovery=True,
+            provide_default_prompt=True,
+            permanent_tool_mode=permanent_mode,
+            selected_tool_names=permanent_names,
+            include_permanent_schemas=False,
+            on_demand_discovery=True,
+            disabled_tool_mode=disabled_mode,
+            disabled_tool_names=disabled_names,
+            tool_name_pattern="",
+            regex_timeout=0.1,
+        )
+
+    assert err.value.field == "disabled_tools"
+    assert err.value.code == "permanent_disabled_tool_conflict"
 
 
 def test_service_config_selection_rejects_unknown_tool():
@@ -327,6 +386,8 @@ def test_permanent_context_estimate_uses_the_rendered_schema_content():
             permanent_tools=tools,
             include_permanent_schemas=False,
             provide_default_prompt=True,
+            disabled_tools=("read_secret",),
+            tool_name_pattern="write_.*",
         )
     )
     schema_context = MCPContextRenderer.render_permanent_context(
@@ -335,6 +396,8 @@ def test_permanent_context_estimate_uses_the_rendered_schema_content():
             permanent_tools=tools,
             include_permanent_schemas=True,
             provide_default_prompt=True,
+            disabled_tools=("read_secret",),
+            tool_name_pattern="write_.*",
         )
     )
     metadata_only = MCPContextEstimate.from_context(metadata_context)

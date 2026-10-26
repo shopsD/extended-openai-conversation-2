@@ -23,6 +23,7 @@
             "invalid_name": "Enter a name for the MCP service.",
             "invalid_server_id": "Use lowercase letters, numbers, underscores, or hyphens; the ID must start with a letter or number.",
             "invalid_permanent_tools": "Select only tools advertised by this MCP server.",
+            "permanent_disabled_tool_conflict": "A tool cannot be both permanently provided and disabled from on-demand discovery.",
             "invalid_regex_timeout": "Enter a regular-expression timeout greater than zero.",
             "invalid_filter_mode": "Select a valid include/exclude behavior.",
             "invalid_tool_name_pattern": "Enter a valid regular expression.",

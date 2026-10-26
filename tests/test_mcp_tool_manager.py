@@ -39,6 +39,8 @@ def _service(
     description: str = "",
     permanent_tools: tuple[MCPTool, ...] = (),
     on_demand_discovery: bool = True,
+    disabled_tools: tuple[str, ...] = (),
+    tool_name_pattern: str = "",
     tools: tuple[MCPTool, ...] = (),
 ) -> MCPService:
     config = MCPServiceConfig(
@@ -50,6 +52,8 @@ def _service(
         ),
         permanent_tools=permanent_tools,
         on_demand_discovery=on_demand_discovery,
+        disabled_tools=disabled_tools,
+        tool_name_pattern=tool_name_pattern,
     )
     client = MagicMock(spec=MCPClient)
     client.list_tools = AsyncMock(return_value=tools)
@@ -330,6 +334,8 @@ async def test_get_schema_returns_permanent_schema_without_server_call():
         "storage",
         permanent_tools=(permanent,),
         on_demand_discovery=False,
+        disabled_tools=("permanent_tool",),
+        tool_name_pattern="different_tool",
     )
 
     result = await MCPToolManager.get_schema(
