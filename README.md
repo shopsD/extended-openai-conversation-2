@@ -189,7 +189,7 @@ options and two new options.
  - `Tool name regular expression`: This is a filter to exclude any tools that match this filter when an agent does a tool search/lookup. This only searches the name of the tool and does not search descriptions. This filter uses Regular expressions (regex). Any tools that match this search will not be available or seen by an agent
  - `Regular expression timeout`: When the integration attempts a search with regular expressions (including if an agent is also performing a search and is using regular expressions to search for a tool/server), this timeout is used to prevent the integration from getting stuck. This can be a decimal number
 
-**NOTES: 
+**NOTES:**
  - If `On-Demand Discovery` is disabled and no permanent tools are provided, then the Agent will not be able to call any MCP tool. 
  - If a tool is in the disabled tool selection but would be excluded from the regex, the tool will still be unavailable to the agent. The regex search does not override the manually specified disabled tools
  - If a server ID and tool name are manually given to the agent in a prompt but they are disabled in the config and the agent attempts to call the tool, the integration will deny the request
@@ -199,7 +199,7 @@ options and two new options.
  - The permanent context size in the review section is an estimation of how many additional tokens are consumed by any agent using the current MCP server with its present configuration. The size can be reduced by enabling `On-Demand discovery` and reducing the number of `Permanent tools`. However, this will lead to more tool calls
  - If the config reports a connection has failed, the MCP server can still be saved, but calls to that MCP server may fail
  - Both Conversation Agents and Task Agents can have access to MCP servers
- **
+
 ### Functions
 
 #### Supported function types
