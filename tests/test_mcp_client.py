@@ -1,5 +1,7 @@
 """Tests for the extractable MCP client public API."""
 
+from unittest.mock import patch
+
 import pytest
 
 from custom_components.extended_openai_conversation.mcp_client import (
@@ -183,7 +185,7 @@ def test_service_config_applies_filters_only_to_on_demand_tools():
         on_demand_discovery=True,
         disabled_tool_mode="selected",
         disabled_tool_names=[],
-        tool_name_pattern=r"read_(secret|public)",
+        tool_name_pattern=r"write_.*",
         regex_timeout=0.1,
     )
 
@@ -193,22 +195,70 @@ def test_service_config_applies_filters_only_to_on_demand_tools():
         "read_public",
     ]
     assert not config.tool_allowed("write_secret")
-    assert not config.tool_allowed("read_secret_extra_suffix")
+    assert config.tool_allowed("read_secret_extra_suffix")
 
 
-@pytest.mark.parametrize(
-    ("permanent_mode", "permanent_names", "disabled_mode", "disabled_names"),
-    [
-        ("selected", ["write_secret"], "selected", ["write_secret"]),
-        ("selected", ["write_secret"], "unselected", []),
-    ],
-)
-def test_service_config_rejects_permanent_disabled_tool_conflict(
-    permanent_mode: str,
-    permanent_names: list[str],
+@pytest.mark.parametrize("disabled_mode", ["selected", "unselected"])
+def test_empty_disabled_selection_does_not_affect_regex_filter(
     disabled_mode: str,
-    disabled_names: list[str],
 ):
+    """An empty exact selection is inactive regardless of its mode."""
+    config = MCPServiceConfig(
+        server=MCPServerConfig(
+            server_id="tools",
+            name="Tool Server",
+            url="https://mcp.example.com/api",
+        ),
+        disabled_tool_mode=disabled_mode,
+        disabled_tools=(),
+        tool_name_pattern=r".*delete.*",
+    )
+
+    assert config.tool_allowed("read_record")
+    assert not config.tool_allowed("delete_record")
+
+
+def test_explicit_disabled_tool_short_circuits_regex_filter():
+    """A tool disabled by exact selection is rejected without regex evaluation."""
+    config = MCPServiceConfig(
+        server=MCPServerConfig(
+            server_id="tools",
+            name="Tool Server",
+            url="https://mcp.example.com/api",
+        ),
+        disabled_tool_mode="selected",
+        disabled_tools=("read_record",),
+        tool_name_pattern=r".*delete.*",
+    )
+
+    with patch(
+        "custom_components.extended_openai_conversation.mcp_client."
+        "service_config.regex.fullmatch"
+    ) as fullmatch:
+        assert not config.tool_allowed("read_record")
+
+    fullmatch.assert_not_called()
+
+
+def test_disabled_selection_and_regex_are_independent_deny_filters():
+    """Either an exact disabled selection or a regex match rejects a tool."""
+    config = MCPServiceConfig(
+        server=MCPServerConfig(
+            server_id="tools",
+            name="Tool Server",
+            url="https://mcp.example.com/api",
+        ),
+        disabled_tool_mode="selected",
+        disabled_tools=("read_record",),
+        tool_name_pattern=r".*delete.*",
+    )
+
+    assert not config.tool_allowed("read_record")
+    assert not config.tool_allowed("delete_record")
+    assert config.tool_allowed("update_record")
+
+
+def test_service_config_rejects_permanent_disabled_tool_conflict():
     """Resolved permanent and disabled selections must not overlap."""
     server = MCPServerConfig(
         server_id="vault",
@@ -240,18 +290,62 @@ def test_service_config_rejects_permanent_disabled_tool_conflict(
             discovery,
             perform_tool_discovery=True,
             provide_default_prompt=True,
-            permanent_tool_mode=permanent_mode,
-            selected_tool_names=permanent_names,
+            permanent_tool_mode="selected",
+            selected_tool_names=["write_secret"],
             include_permanent_schemas=False,
             on_demand_discovery=True,
-            disabled_tool_mode=disabled_mode,
-            disabled_tool_names=disabled_names,
+            disabled_tool_mode="selected",
+            disabled_tool_names=["write_secret"],
             tool_name_pattern="",
             regex_timeout=0.1,
         )
 
     assert err.value.field == "disabled_tools"
     assert err.value.code == "permanent_disabled_tool_conflict"
+
+
+def test_empty_disabled_selection_does_not_conflict_with_permanent_tools():
+    """An empty inverted selection resolves to no disabled tools."""
+    server = MCPServerConfig(
+        server_id="vault",
+        name="Vault MCP",
+        url="https://mcp.example.com/api",
+    )
+    tool = MCPTool(
+        name="write_secret",
+        title=None,
+        description=None,
+        input_schema={"type": "object"},
+        output_schema=None,
+        definition={"name": "write_secret"},
+    )
+    discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(tool,),
+    )
+
+    config = MCPServiceConfig.from_selection(
+        server,
+        discovery,
+        perform_tool_discovery=True,
+        provide_default_prompt=True,
+        permanent_tool_mode="selected",
+        selected_tool_names=["write_secret"],
+        include_permanent_schemas=False,
+        on_demand_discovery=True,
+        disabled_tool_mode="unselected",
+        disabled_tool_names=[],
+        tool_name_pattern="",
+        regex_timeout=0.1,
+    )
+
+    assert config.permanent_tools == (tool,)
 
 
 def test_service_config_selection_rejects_unknown_tool():
