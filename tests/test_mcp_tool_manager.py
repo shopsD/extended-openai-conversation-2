@@ -9,6 +9,7 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPServiceConfig,
     MCPTool,
     MCPToolManager,
+    MCPToolResult,
 )
 
 
@@ -347,3 +348,98 @@ async def test_get_schema_validates_identifiers():
     assert (
         await MCPToolManager.get_schema([], server_id="server", tool_name="")
     )["error"]["code"] == "invalid_tool_name"
+
+
+async def test_execute_tool_runs_permanent_tool_without_discovery():
+    """A permanent tool executes directly from its saved definition."""
+    permanent = _tool("permanent_tool", "Permanent")
+    storage = _service(
+        "storage",
+        permanent_tools=(permanent,),
+        on_demand_discovery=False,
+    )
+    storage.client.call_tool.return_value = MCPToolResult(
+        content=({"type": "text", "text": "done"},),
+        structured_content={"success": True},
+        is_error=False,
+    )
+
+    result = await MCPToolManager.execute_tool(
+        [storage],
+        server_id="storage",
+        tool_name="permanent_tool",
+        arguments={"value": 1},
+    )
+
+    assert result == {
+        "server_id": "storage",
+        "tool_name": "permanent_tool",
+        "content": [{"type": "text", "text": "done"}],
+        "structured_content": {"success": True},
+        "is_error": False,
+    }
+    storage.client.list_tools.assert_not_awaited()
+    storage.client.call_tool.assert_awaited_once_with(
+        "permanent_tool", {"value": 1}
+    )
+
+
+async def test_execute_tool_discovers_non_permanent_tool():
+    """A non-permanent tool must pass live discovery before execution."""
+    upload = _tool("upload_file", "Upload a file")
+    storage = _service("storage", tools=(upload,))
+    storage.client.call_tool.return_value = MCPToolResult((), None, False)
+
+    result = await MCPToolManager.execute_tool(
+        [storage], server_id="storage", tool_name="upload_file"
+    )
+
+    assert result["is_error"] is False
+    storage.client.list_tools.assert_awaited_once_with()
+    storage.client.call_tool.assert_awaited_once_with("upload_file", None)
+
+
+async def test_execute_tool_hides_unassigned_server():
+    """Execution does not reveal whether an unassigned server exists."""
+    storage = _service("storage")
+
+    result = await MCPToolManager.execute_tool(
+        [storage], server_id="not-assigned", tool_name="upload_file"
+    )
+
+    assert result["error"]["code"] == "tool_not_found"
+    storage.client.list_tools.assert_not_awaited()
+    storage.client.call_tool.assert_not_awaited()
+
+
+async def test_execute_tool_rejects_undiscoverable_tool():
+    """A non-permanent tool cannot execute when discovery is disabled."""
+    storage = _service(
+        "storage",
+        on_demand_discovery=False,
+        tools=(_tool("upload_file", "Upload a file"),),
+    )
+
+    result = await MCPToolManager.execute_tool(
+        [storage], server_id="storage", tool_name="upload_file"
+    )
+
+    assert result["error"]["code"] == "tool_not_found"
+    storage.client.list_tools.assert_not_awaited()
+    storage.client.call_tool.assert_not_awaited()
+
+
+async def test_execute_tool_validates_arguments():
+    """Tool arguments must be an object with string keys."""
+    storage = _service("storage")
+
+    result = await MCPToolManager.execute_tool(
+        [storage],
+        server_id="storage",
+        tool_name="upload_file",
+        arguments=MagicMock(),
+    )
+
+    assert result["error"]["code"] == "invalid_arguments"
+    storage.client.list_tools.assert_not_awaited()
+    storage.client.call_tool.assert_not_awaited()

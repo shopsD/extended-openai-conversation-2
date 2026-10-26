@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Any
 
 import regex
 
-from .mcp_datatypes import MCPTool
+from .mcp_datatypes import MCPTool, MCPToolResult
 from .mcp_service import MCPService
 from .service_config import MCPServiceConfig
 
@@ -211,28 +211,41 @@ class MCPToolManager:
         if service is None:
             return MCPToolManager._tool_not_found()
 
-        permanent_tool = next(
-            (
-                tool
-                for tool in service.config.permanent_tools
-                if tool.name == tool_name and service.config.tool_allowed(tool.name)
-            ),
-            None,
-        )
-        if permanent_tool is not None:
-            return MCPToolManager._schema_result(server_id, permanent_tool)
-
-        discoverable_tool = next(
-            (
-                tool
-                for tool in await MCPToolManager._discoverable_tools(service)
-                if tool.name == tool_name
-            ),
-            None,
-        )
-        if discoverable_tool is None:
+        tool = await MCPToolManager._find_tool(service, tool_name)
+        if tool is None:
             return MCPToolManager._tool_not_found()
-        return MCPToolManager._schema_result(server_id, discoverable_tool)
+        return MCPToolManager._schema_result(server_id, tool)
+
+    @staticmethod
+    async def execute_tool(
+        services: Collection[MCPService],
+        *,
+        server_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Execute one authorized MCP tool without retrying side effects."""
+        if not isinstance(server_id, str) or not server_id:
+            return MCPToolManager._error(
+                "invalid_server_id", "server_id must be a non-empty string"
+            )
+        if not isinstance(tool_name, str) or not tool_name:
+            return MCPToolManager._error("invalid_tool_name", "tool_name must be a non-empty string")
+        if arguments is not None and (
+            not isinstance(arguments, Mapping)
+            or not all(isinstance(key, str) for key in arguments)
+        ):
+            return MCPToolManager._error("invalid_arguments", "arguments must be an object with string keys")
+
+        service: MCPService | None = MCPToolManager._service_by_id(services, server_id)
+        if service is None:
+            return MCPToolManager._tool_not_found()
+        tool = await MCPToolManager._find_tool(service, tool_name)
+        if tool is None:
+            return MCPToolManager._tool_not_found()
+
+        result = await service.client.call_tool(tool.name, arguments)
+        return MCPToolManager._tool_result(server_id, tool.name, result)
 
     @staticmethod
     def _prepare_search(
@@ -368,6 +381,28 @@ class MCPToolManager:
         return service.config.filter_on_demand_tools(await service.client.list_tools())
 
     @staticmethod
+    async def _find_tool(service: MCPService, tool_name: str) -> MCPTool | None:
+        """Find an exact permanent or discoverable tool allowed by policy."""
+        permanent_tool = next(
+            (
+                tool
+                for tool in service.config.permanent_tools
+                if tool.name == tool_name and service.config.tool_allowed(tool.name)
+            ),
+            None,
+        )
+        if permanent_tool is not None:
+            return permanent_tool
+        return next(
+            (
+                tool
+                for tool in await MCPToolManager._discoverable_tools(service)
+                if tool.name == tool_name
+            ),
+            None,
+        )
+
+    @staticmethod
     def _service_by_id(
         services: Collection[MCPService], server_id: str
     ) -> MCPService | None:
@@ -388,6 +423,19 @@ class MCPToolManager:
             "server_id": server_id,
             "tool_name": tool.name,
             "input_schema": tool.input_schema,
+        }
+
+    @staticmethod
+    def _tool_result(
+        server_id: str, tool_name: str, result: MCPToolResult
+    ) -> dict[str, Any]:
+        """Return the serializable result of one tool invocation."""
+        return {
+            "server_id": server_id,
+            "tool_name": tool_name,
+            "content": list(result.content),
+            "structured_content": result.structured_content,
+            "is_error": result.is_error,
         }
 
     @staticmethod
