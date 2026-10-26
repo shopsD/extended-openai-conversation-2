@@ -64,6 +64,8 @@ class MCPToolManager:
         if validation_error is not None:
             return validation_error
 
+        include_tools = include_tools or all_tools
+
         try:
             fields, pattern = MCPToolManager._prepare_search(
                 search_fields=search_fields,

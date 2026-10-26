@@ -5,7 +5,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.extended_openai_conversation.functions import MCPFunction
+from custom_components.extended_openai_conversation.functions.mcp import (
+    build_mcp_function_tool,
+)
 from custom_components.extended_openai_conversation.mcp_client import MCPToolManager
+
+
+def test_all_tools_description_explains_implicit_bounded_preview():
+    """The model is told how all_tools affects inclusion and pagination."""
+    tool = build_mcp_function_tool(["weather"])
+
+    description = tool["spec"]["parameters"]["properties"]["all_tools"][
+        "description"
+    ]
+    assert "Implies include_tools=true" in description
+    assert "per-server result limit" in description
+    assert "paginate further" in description
 
 
 @pytest.mark.parametrize(

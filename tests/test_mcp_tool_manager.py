@@ -166,6 +166,29 @@ async def test_list_servers_limits_nested_tool_results():
     assert server["tools_truncated"] is True
 
 
+async def test_list_servers_all_tools_implies_include_tools():
+    """Requesting all tools enables a bounded nested tool preview."""
+    storage = _service(
+        "storage",
+        tools=tuple(_tool(f"tool_{index}", "Tool") for index in range(3)),
+    )
+
+    result = await MCPToolManager.list_servers(
+        [storage],
+        query="storage",
+        search_fields=["server_id"],
+        all_tools=True,
+        entries_per_page=2,
+    )
+
+    server = result["servers"][0]
+    assert [tool["tool_name"] for tool in server["tools"]] == ["tool_0", "tool_1"]
+    assert server["tool_matches"] == 3
+    assert server["tools_returned"] == 2
+    assert server["tools_truncated"] is True
+    storage.client.list_tools.assert_awaited_once_with()
+
+
 async def test_list_servers_reports_metadata_match_without_tool_match():
     """A server metadata match remains visible with an explanatory empty list."""
     storage = _service("storage", tools=(_tool("upload_file", "Upload a file"),))

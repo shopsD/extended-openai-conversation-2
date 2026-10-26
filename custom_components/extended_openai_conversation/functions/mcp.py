@@ -116,8 +116,11 @@ def build_mcp_function_tool(server_ids: list[str]) -> dict[str, Any]:
                     "all_tools": {
                         "type": "boolean",
                         "description": (
-                            "For list_servers, include all eligible tools from each "
-                            "matching server."
+                            "For list_servers, include all discoverable tools from "
+                            "each matching server rather than only tools matching "
+                            "the query, subject to the per-server result limit. "
+                            "Implies include_tools=true. Use list_tools with the "
+                            "returned server ID to paginate further."
                         ),
                     },
                     "include_description": {
