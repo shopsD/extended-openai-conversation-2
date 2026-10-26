@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from custom_components.extended_openai_conversation.mcp_client import (
     MCPClient,
     MCPServerConfig,
+    MCPService,
     MCPServiceConfig,
     MCPTool,
     MCPToolManager,
@@ -32,7 +33,7 @@ def _service(
     permanent_tools: tuple[MCPTool, ...] = (),
     on_demand_discovery: bool = True,
     tools: tuple[MCPTool, ...] = (),
-) -> tuple[MCPServiceConfig, MCPClient]:
+) -> MCPService:
     config = MCPServiceConfig(
         server=MCPServerConfig(
             server_id=server_id,
@@ -45,7 +46,12 @@ def _service(
     )
     client = MagicMock(spec=MCPClient)
     client.list_tools = AsyncMock(return_value=tools)
-    return config, client
+    return MCPService(
+        entry_id=f"{server_id}-entry",
+        title=f"{server_id.title()} Server",
+        config=config,
+        client=client,
+    )
 
 
 async def test_list_servers_without_tool_fields_avoids_server_calls():
@@ -72,8 +78,8 @@ async def test_list_servers_without_tool_fields_avoids_server_calls():
         "max_pages": 1,
         "entries_per_page": 20,
     }
-    storage[1].list_tools.assert_not_awaited()
-    calendar[1].list_tools.assert_not_awaited()
+    storage.client.list_tools.assert_not_awaited()
+    calendar.client.list_tools.assert_not_awaited()
 
 
 async def test_list_servers_searches_only_discoverable_non_permanent_tools():
@@ -96,7 +102,49 @@ async def test_list_servers_searches_only_discoverable_non_permanent_tools():
     assert result["servers"][0]["tools"] == [
         {"tool_name": "upload_file", "description": "Upload a file"}
     ]
-    storage[1].list_tools.assert_awaited_once_with()
+    storage.client.list_tools.assert_awaited_once_with()
+
+
+async def test_list_servers_controls_tool_descriptions_and_schemas():
+    """Tool descriptions and schemas are independently optional."""
+    storage = _service(
+        "storage", tools=(_tool("upload_file", "Upload a file"),)
+    )
+
+    result = await MCPToolManager.list_servers(
+        [storage],
+        include_tools=True,
+        include_description=False,
+        include_schema=True,
+    )
+
+    assert result["servers"][0]["tools"] == [
+        {
+            "tool_name": "upload_file",
+            "input_schema": {
+                "type": "object",
+                "properties": {"file_path": {"type": "string"}},
+            },
+        }
+    ]
+
+
+async def test_list_servers_limits_nested_tool_results():
+    """One server cannot bypass the response limit with a large tool list."""
+    storage = _service(
+        "storage",
+        tools=tuple(_tool(f"tool_{index}", "Tool") for index in range(3)),
+    )
+
+    result = await MCPToolManager.list_servers(
+        [storage], include_tools=True, entries_per_page=2
+    )
+
+    server = result["servers"][0]
+    assert [tool["tool_name"] for tool in server["tools"]] == ["tool_0", "tool_1"]
+    assert server["tool_matches"] == 3
+    assert server["tools_returned"] == 2
+    assert server["tools_truncated"] is True
 
 
 async def test_list_servers_reports_metadata_match_without_tool_match():

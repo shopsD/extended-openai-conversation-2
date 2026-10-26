@@ -47,6 +47,8 @@ class MCPToolManager:
         search_case_sensitive: bool = False,
         include_tools: bool = False,
         all_tools: bool = False,
+        include_description: bool = True,
+        include_schema: bool = False,
         current_page: int = 1,
         entries_per_page: int = _DEFAULT_ENTRIES_PER_PAGE,
     ) -> dict[str, Any]:
@@ -95,6 +97,9 @@ class MCPToolManager:
                         matching_tools=matching_tools,
                         include_tools=include_tools,
                         all_tools=all_tools,
+                        include_description=include_description,
+                        include_schema=include_schema,
+                        tool_limit=entries_per_page,
                     )
                 )
         except TimeoutError:
@@ -175,6 +180,9 @@ class MCPToolManager:
         matching_tools: tuple[MCPTool, ...],
         include_tools: bool,
         all_tools: bool,
+        include_description: bool,
+        include_schema: bool,
+        tool_limit: int,
     ) -> dict[str, Any]:
         """Build one model-facing server result after matching is complete."""
         server = config.server
@@ -188,8 +196,16 @@ class MCPToolManager:
 
         returned_tools = tools if query is None or all_tools else matching_tools
         result["tools"] = [
-            MCPToolManager._tool_summary(tool) for tool in returned_tools
+            MCPToolManager._tool_summary(
+                tool,
+                include_description=include_description,
+                include_schema=include_schema,
+            )
+            for tool in returned_tools[:tool_limit]
         ]
+        result["tool_matches"] = len(returned_tools)
+        result["tools_returned"] = len(result["tools"])
+        result["tools_truncated"] = len(returned_tools) > tool_limit
         if query is not None and server_matches and not matching_tools:
             result["tool_match_message"] = (
                 "Server metadata matched, but no discoverable tools matched the "
@@ -288,9 +304,19 @@ class MCPToolManager:
         return any(query in value for value in values)
 
     @staticmethod
-    def _tool_summary(tool: MCPTool) -> dict[str, Any]:
+    def _tool_summary(
+        tool: MCPTool,
+        *,
+        include_description: bool,
+        include_schema: bool,
+    ) -> dict[str, Any]:
         """Return the compact tool representation used by list_servers."""
-        return {"tool_name": tool.name, "description": tool.description}
+        result: dict[str, Any] = {"tool_name": tool.name}
+        if include_description:
+            result["description"] = tool.description
+        if include_schema:
+            result["input_schema"] = tool.input_schema
+        return result
 
     @staticmethod
     def _validate_list_request(
