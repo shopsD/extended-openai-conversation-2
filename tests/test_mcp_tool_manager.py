@@ -191,3 +191,85 @@ async def test_list_servers_regex_searches_schema_values():
 
     assert result["servers"][0]["id"] == "storage"
     assert result["servers"][0]["tools"][0]["tool_name"] == "upload_file"
+
+
+async def test_list_tools_scopes_query_to_selected_authorized_servers():
+    """A scoped tool search contacts only selected authorized services."""
+    storage = _service(
+        "storage", tools=(_tool("upload_file", "Upload a file"),)
+    )
+    calendar = _service(
+        "calendar", tools=(_tool("create_event", "Create an event"),)
+    )
+
+    result = await MCPToolManager.list_tools(
+        [storage, calendar],
+        server_ids=["storage", "not-assigned"],
+        query="upload",
+        search_fields=["tool_name"],
+        include_description=False,
+        include_schema=True,
+    )
+
+    assert result["tools"] == [
+        {
+            "tool_name": "upload_file",
+            "input_schema": {
+                "type": "object",
+                "properties": {"file_path": {"type": "string"}},
+            },
+            "server_id": "storage",
+        }
+    ]
+    storage.client.list_tools.assert_awaited_once_with()
+    calendar.client.list_tools.assert_not_awaited()
+
+
+async def test_list_tools_returns_empty_for_unassigned_server():
+    """An unknown or unassigned server is indistinguishable from no match."""
+    storage = _service(
+        "storage", tools=(_tool("upload_file", "Upload a file"),)
+    )
+
+    result = await MCPToolManager.list_tools(
+        [storage], server_ids=["not-assigned"]
+    )
+
+    assert result == {
+        "tools": [],
+        "max_matches": 0,
+        "current_page": 1,
+        "max_pages": 0,
+        "entries_per_page": 20,
+    }
+    storage.client.list_tools.assert_not_awaited()
+
+
+async def test_list_tools_invalid_regex_avoids_server_calls():
+    """An invalid request regex is rejected before live discovery."""
+    storage = _service("storage")
+
+    result = await MCPToolManager.list_tools(
+        [storage], query="(", search_regex=True
+    )
+
+    assert result["error"]["code"] == "invalid_regex"
+    storage.client.list_tools.assert_not_awaited()
+
+
+async def test_list_tools_excludes_permanent_tools_and_paginates_globally():
+    """Discovery omits permanent tools before paginating the flattened result."""
+    permanent = _tool("permanent_tool", "Permanent")
+    storage = _service(
+        "storage",
+        permanent_tools=(permanent,),
+        tools=(permanent, _tool("tool_one", "One"), _tool("tool_two", "Two")),
+    )
+
+    result = await MCPToolManager.list_tools(
+        [storage], current_page=2, entries_per_page=1
+    )
+
+    assert result["tools"][0]["tool_name"] == "tool_two"
+    assert result["max_matches"] == 2
+    assert result["max_pages"] == 2

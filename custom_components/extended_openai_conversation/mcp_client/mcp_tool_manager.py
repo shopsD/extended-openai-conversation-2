@@ -54,9 +54,10 @@ class MCPToolManager:
     ) -> dict[str, Any]:
         """Return authorized MCP servers matching the requested criteria."""
 
-        validation_error: dict[str, Any] | None = MCPToolManager._validate_list_request(
+        validation_error: dict[str, Any] | None = MCPToolManager._validate_search_request(
             query=query,
             search_fields=search_fields,
+            supported_search_fields=_SERVER_SEARCH_FIELDS,
             current_page=current_page,
             entries_per_page=entries_per_page,
         )
@@ -69,6 +70,7 @@ class MCPToolManager:
                 query=query,
                 search_regex=search_regex,
                 search_case_sensitive=search_case_sensitive,
+                default_fields=_SERVER_SEARCH_FIELDS,
             )
         except regex.error as err:
             return MCPToolManager._error("invalid_regex", str(err))
@@ -113,16 +115,97 @@ class MCPToolManager:
         )
 
     @staticmethod
+    async def list_tools(
+        services: Collection[MCPService],
+        *,
+        server_ids: Collection[str] | None = None,
+        query: str | None = None,
+        search_fields: Collection[str] | None = None,
+        search_regex: bool = False,
+        search_case_sensitive: bool = False,
+        include_description: bool = True,
+        include_schema: bool = False,
+        current_page: int = 1,
+        entries_per_page: int = _DEFAULT_ENTRIES_PER_PAGE,
+    ) -> dict[str, Any]:
+        """Return discoverable tools from authorized MCP services."""
+        validation_error = MCPToolManager._validate_search_request(
+            query=query,
+            search_fields=search_fields,
+            supported_search_fields=_TOOL_SEARCH_FIELDS,
+            current_page=current_page,
+            entries_per_page=entries_per_page,
+        )
+        if validation_error is not None:
+            return validation_error
+        if server_ids is not None and (
+            isinstance(server_ids, str)
+            or not all(isinstance(server_id, str) for server_id in server_ids)
+        ):
+            return MCPToolManager._error("invalid_server_ids", "server_ids must be a list of strings")
+
+        try:
+            fields, pattern = MCPToolManager._prepare_search(
+                search_fields=search_fields,
+                query=query,
+                search_regex=search_regex,
+                search_case_sensitive=search_case_sensitive,
+                default_fields=_TOOL_SEARCH_FIELDS,
+            )
+        except regex.error as err:
+            return MCPToolManager._error("invalid_regex", str(err))
+
+        selected_server_ids = (
+            frozenset(server_ids) if server_ids is not None else None
+        )
+        matches: list[dict[str, Any]] = []
+        try:
+            for service in services:
+                if (
+                    selected_server_ids is not None
+                    and service.config.server.server_id not in selected_server_ids
+                ):
+                    continue
+                for tool in await MCPToolManager._discoverable_tools(service):
+                    if query is not None and not MCPToolManager._matches(
+                        MCPToolManager._tool_search_values(tool, fields),
+                        query,
+                        pattern=pattern,
+                        case_sensitive=search_case_sensitive,
+                        timeout=service.config.regex_timeout,
+                    ):
+                        continue
+                    result = MCPToolManager._tool_summary(
+                        tool,
+                        include_description=include_description,
+                        include_schema=include_schema,
+                    )
+                    result["server_id"] = service.config.server.server_id
+                    matches.append(result)
+        except TimeoutError:
+            return MCPToolManager._error(
+                "regex_timeout", "The MCP catalogue search timed out"
+            )
+
+        return MCPToolManager._paginate(
+            matches,
+            result_key="tools",
+            current_page=current_page,
+            entries_per_page=entries_per_page,
+        )
+
+    @staticmethod
     def _prepare_search(
         *,
         search_fields: Collection[str] | None,
         query: str | None,
         search_regex: bool,
         search_case_sensitive: bool,
+        default_fields: Collection[str],
     ) -> tuple[frozenset[str], regex.Pattern[str] | None]:
         """Resolve default fields and compile an optional search expression."""
         fields = (
-            frozenset(search_fields) if search_fields is not None else _SERVER_SEARCH_FIELDS
+            frozenset(search_fields) if search_fields is not None else frozenset(default_fields)
         )
         if query is None or not search_regex:
             return fields, None
@@ -319,14 +402,15 @@ class MCPToolManager:
         return result
 
     @staticmethod
-    def _validate_list_request(
+    def _validate_search_request(
         *,
         query: str | None,
         search_fields: Collection[str] | None,
+        supported_search_fields: Collection[str],
         current_page: int,
         entries_per_page: int,
     ) -> dict[str, Any] | None:
-        """Validate list_servers arguments and return a structured error."""
+        """Validate shared search and pagination arguments."""
         if query is not None and not isinstance(query, str):
             return MCPToolManager._error("invalid_query", "query must be a string")
         if search_fields is not None:
@@ -336,7 +420,7 @@ class MCPToolManager:
                 or not all(isinstance(field, str) for field in search_fields)
             ):
                 return MCPToolManager._error("invalid_search_fields", "search_fields must be a non-empty list")
-            invalid_fields = set(search_fields) - _SERVER_SEARCH_FIELDS
+            invalid_fields = set(search_fields) - set(supported_search_fields)
             if invalid_fields:
                 return MCPToolManager._error(
                     "invalid_search_fields",
