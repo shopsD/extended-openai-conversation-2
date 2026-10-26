@@ -6,6 +6,9 @@
             "unknown": "Errore imprevisto"
         },
         "step": {
+            "mcp_default_prompt": {
+                "description": "Usa il dispatcher MCP con list_servers per trovare i server disponibili, list_tools per scoprire gli strumenti, get_schema per recuperare lo schema completo di uno strumento ed execute_tool per eseguirlo. Usa il server_id e il nome dello strumento forniti in questo contesto o restituiti dalla ricerca. Gli strumenti già descritti in questo contesto non devono essere cercati di nuovo."
+            },
             "user": {
                 "data": {
                     "name": "Nome",

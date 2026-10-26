@@ -6,6 +6,9 @@
             "unknown": "Nieznany błąd"
         },
         "step": {
+            "mcp_default_prompt": {
+                "description": "Użyj dyspozytora MCP: list_servers służy do znajdowania dostępnych serwerów, list_tools do odkrywania narzędzi, get_schema do pobierania pełnego schematu narzędzia, a execute_tool do jego uruchamiania. Użyj wartości server_id i nazwy narzędzia podanych w tym kontekście lub zwróconych przez wyszukiwanie. Narzędzi już opisanych w tym kontekście nie trzeba ponownie odkrywać."
+            },
             "user": {
                 "data": {
                     "name": "Imię",

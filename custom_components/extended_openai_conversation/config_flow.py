@@ -123,6 +123,7 @@ from .const import (
 )
 from .helpers import (
     async_check_openai_connection,
+    async_get_mcp_default_prompt,
     get_authenticated_client,
     get_model_config,
     get_service_type,
@@ -1229,8 +1230,14 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         else:
             await self._async_test_mcp_server(run_requested_discovery=False)
 
+        default_prompt = await async_get_mcp_default_prompt(
+            self.hass, self.hass.config.language
+        )
         estimate: MCPContextEstimate = MCPContextEstimate.from_context(
-            MCPContextRenderer.render_permanent_context(service_config)
+            MCPContextRenderer.render_permanent_context(
+                service_config,
+                default_prompt=default_prompt,
+            )
         )
 
         return self.async_show_form(

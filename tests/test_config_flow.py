@@ -1094,6 +1094,10 @@ async def test_filter_submission_can_be_reviewed_and_saved(hass):
         "custom_components.extended_openai_conversation.config_flow."
         "MCPClientConfigFlow.check_connection",
         new=AsyncMock(),
+    ), patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "async_get_mcp_default_prompt",
+        new=AsyncMock(return_value="Localized MCP prompt"),
     ):
         result = await flow.async_step_mcp_review()
 

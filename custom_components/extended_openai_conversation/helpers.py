@@ -17,12 +17,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.template import Template
+from homeassistant.helpers.translation import async_get_translations
 
 from .const import (
     ALTERNATE_REQUEST_PARAMS,
     CONF_SERVICE_TYPE,
     DEFAULT_MODEL_CONFIG,
     DEFAULT_SERVICE_TYPE,
+    DOMAIN,
     MODEL_CONFIG_PATTERNS,
     OPENAI_API_HOST,
     OPENAI_DEFAULT_MODEL_CONFIG,
@@ -31,11 +33,28 @@ from .const import (
     REASONING_EFFORT_WITH_TOOLS,
     UNSUPPORTED_PARAM_ERROR_CODES,
 )
+from .mcp_client import DEFAULT_MCP_PROMPT
 
 _LOGGER = logging.getLogger(__name__)
 
 
 AZURE_DOMAIN_PATTERN = r"\.(openai\.azure\.com|azure-api\.net|services\.ai\.azure\.com)"
+MCP_DEFAULT_PROMPT_TRANSLATION_KEY = (
+    f"component.{DOMAIN}.config.step.mcp_default_prompt.description"
+)
+
+
+async def async_get_mcp_default_prompt(
+    hass: HomeAssistant, language: str
+) -> str:
+    """Return localized model guidance for the MCP dispatcher."""
+    translations = await async_get_translations(
+        hass,
+        language,
+        "config",
+        integrations={DOMAIN},
+    )
+    return translations.get(MCP_DEFAULT_PROMPT_TRANSLATION_KEY, DEFAULT_MCP_PROMPT)
 
 
 def get_service_type(entry: ConfigEntry) -> str:

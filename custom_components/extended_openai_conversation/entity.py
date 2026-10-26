@@ -62,7 +62,11 @@ from .const import (
 from .exceptions import FunctionNotFound, ParseArgumentsFailed, TokenLengthExceededError
 from .functions import get_function
 from .functions.mcp import build_mcp_function_tool
-from .helpers import async_create_chat_completion, get_model_config
+from .helpers import (
+    async_create_chat_completion,
+    async_get_mcp_default_prompt,
+    get_model_config,
+)
 from .mcp_client import MCPContextRenderer
 from .mcp_service_manager import MCPServiceManager
 
@@ -386,7 +390,9 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
             return []
         return [build_mcp_function_tool(server_ids)]
 
-    def _get_mcp_context_messages(self) -> list[ChatCompletionSystemMessageParam]:
+    async def _async_get_mcp_context_messages(
+        self, language: str
+    ) -> list[ChatCompletionSystemMessageParam]:
         """Return stable context for configured tools already known to the agent."""
         server_ids = self.subentry.data.get(CONF_MCP_SERVERS, []) or []
         if not server_ids:
@@ -394,8 +400,19 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
 
         services = MCPServiceManager(self.hass).scope(server_ids).list_loaded()
         messages: list[ChatCompletionSystemMessageParam] = []
+        if any(service.config.provide_default_prompt for service in services):
+            messages.append(
+                ChatCompletionSystemMessageParam(
+                    role="system",
+                    content=await async_get_mcp_default_prompt(self.hass, language),
+                )
+            )
+
         for service in services:
-            context = MCPContextRenderer.render_permanent_context(service.config)
+            context = MCPContextRenderer.render_permanent_context(
+                service.config,
+                default_prompt=None,
+            )
             if context.content:
                 messages.append(
                     ChatCompletionSystemMessageParam(
@@ -437,7 +454,12 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
             encode_attachments, chat_log.content
         )
 
-        mcp_context_messages = self._get_mcp_context_messages()
+        language = (
+            llm_context.language
+            if llm_context is not None and llm_context.language is not None
+            else self.hass.config.language
+        )
+        mcp_context_messages = await self._async_get_mcp_context_messages(language)
         messages: list[ChatCompletionMessageParam] = [
             *mcp_context_messages,
             *_convert_content_to_param(

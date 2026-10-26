@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import probatio as vol
 
@@ -73,12 +73,12 @@ def _entity_for_stream() -> ExtendedOpenAIBaseLLMEntity:
     return entity
 
 
-def test_mcp_context_messages_use_complete_assigned_saved_catalogue():
-    """On-demand filters do not remove tools from permanent context."""
+async def test_mcp_context_messages_localize_one_prompt_and_use_saved_catalogue():
+    """One localized prompt precedes complete permanent tool context."""
     entity = ExtendedOpenAIBaseLLMEntity.__new__(ExtendedOpenAIBaseLLMEntity)
     entity.hass = MagicMock()
     entity.subentry = MagicMock()
-    entity.subentry.data = {"mcp_servers": ["vault"]}
+    entity.subentry.data = {"mcp_servers": ["vault", "weather"]}
     tool = MCPTool(
         name="read_secret",
         title="Read secret",
@@ -107,22 +107,39 @@ def test_mcp_context_messages_use_complete_assigned_saved_catalogue():
         provide_default_prompt=True,
         disabled_tools=("delete_secret",),
     )
+    second_service = MagicMock()
+    second_service.config = MCPServiceConfig(
+        server=MCPServerConfig(
+            server_id="weather",
+            name="Weather MCP",
+            url="https://weather.example.com/mcp",
+        ),
+        provide_default_prompt=True,
+    )
     scope = MagicMock()
-    scope.list_loaded.return_value = (service,)
+    scope.list_loaded.return_value = (service, second_service)
     manager = MagicMock()
     manager.scope.return_value = scope
 
-    with patch(
-        "custom_components.extended_openai_conversation.entity.MCPServiceManager",
-        return_value=manager,
+    with (
+        patch(
+            "custom_components.extended_openai_conversation.entity.MCPServiceManager",
+            return_value=manager,
+        ),
+        patch(
+            "custom_components.extended_openai_conversation.entity.async_get_mcp_default_prompt",
+            new=AsyncMock(return_value="Instructions MCP traduites"),
+        ) as get_prompt,
     ):
-        messages = entity._get_mcp_context_messages()
+        messages = await entity._async_get_mcp_context_messages("fr")
 
-    manager.scope.assert_called_once_with(["vault"])
+    manager.scope.assert_called_once_with(["vault", "weather"])
     scope.list_loaded.assert_called_once_with()
-    assert len(messages) == 1
+    get_prompt.assert_awaited_once_with(entity.hass, "fr")
+    assert len(messages) == 2
     assert messages[0]["role"] == "system"
-    context = json.loads(messages[0]["content"])
+    assert messages[0]["content"] == "Instructions MCP traduites"
+    context = json.loads(messages[1]["content"])
     assert context["server_id"] == "vault"
     assert context["tools"] == [
         {
@@ -137,10 +154,10 @@ def test_mcp_context_messages_use_complete_assigned_saved_catalogue():
             "output_schema": {"type": "object"},
         },
     ]
-    assert "permanent" not in context["instructions"]
+    assert "instructions" not in context
 
 
-def test_mcp_context_messages_skip_manager_without_assigned_servers():
+async def test_mcp_context_messages_skip_manager_without_assigned_servers():
     """An agent without assigned MCP servers receives no MCP context."""
     entity = ExtendedOpenAIBaseLLMEntity.__new__(ExtendedOpenAIBaseLLMEntity)
     entity.hass = MagicMock()
@@ -150,7 +167,7 @@ def test_mcp_context_messages_skip_manager_without_assigned_servers():
     with patch(
         "custom_components.extended_openai_conversation.entity.MCPServiceManager"
     ) as manager:
-        assert entity._get_mcp_context_messages() == []
+        assert await entity._async_get_mcp_context_messages("en") == []
 
     manager.assert_not_called()
 

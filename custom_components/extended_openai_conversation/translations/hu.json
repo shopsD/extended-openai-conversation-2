@@ -6,6 +6,9 @@
             "unknown": "Váratlan hiba"
         },
         "step": {
+            "mcp_default_prompt": {
+                "description": "Az MCP-diszpécserben a list_servers művelettel keresd meg az elérhető kiszolgálókat, a list_tools művelettel fedezd fel az eszközöket, a get_schema művelettel kérd le egy eszköz teljes sémáját, az execute_tool művelettel pedig futtasd azt. Használd az ebben a kontextusban megadott vagy a felderítés által visszaadott server_id értéket és eszköznevet. Az ebben a kontextusban már leírt eszközöket nem kell újra felderíteni."
+            },
             "user": {
                 "data": {
                     "name": "Név",

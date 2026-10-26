@@ -6,6 +6,9 @@
             "unknown": "Erreur inconnue"
         },
         "step": {
+            "mcp_default_prompt": {
+                "description": "Utilisez le répartiteur MCP avec list_servers pour trouver les serveurs disponibles, list_tools pour découvrir les outils, get_schema pour récupérer le schéma complet d’un outil et execute_tool pour l’exécuter. Utilisez le server_id et le nom de l’outil fournis dans ce contexte ou renvoyés par la découverte. Les outils déjà décrits dans ce contexte n’ont pas besoin d’être découverts à nouveau."
+            },
             "user": {
                 "data": {
                     "name": "Nom",

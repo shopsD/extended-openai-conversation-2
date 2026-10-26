@@ -6,6 +6,9 @@
             "unknown": "Onverwachte fout"
         },
         "step": {
+            "mcp_default_prompt": {
+                "description": "Gebruik de MCP-dispatcher met list_servers om beschikbare servers te vinden, list_tools om hulpmiddelen te ontdekken, get_schema om het volledige schema van een hulpmiddel op te halen en execute_tool om het uit te voeren. Gebruik de server_id en hulpmiddelnaam uit deze context of uit de zoekresultaten. Hulpmiddelen die al in deze context zijn beschreven, hoeven niet opnieuw te worden ontdekt."
+            },
             "user": {
                 "data": {
                     "name": "Naam",

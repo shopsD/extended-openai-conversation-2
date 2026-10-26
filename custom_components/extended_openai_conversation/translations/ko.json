@@ -6,6 +6,9 @@
             "unknown": "Unexpected error"
         },
         "step": {
+            "mcp_default_prompt": {
+                "description": "MCP 디스패처에서 list_servers로 사용 가능한 서버를 찾고, list_tools로 도구를 검색하고, get_schema로 특정 도구의 전체 스키마를 가져오고, execute_tool로 도구를 실행하세요. 이 컨텍스트에 제공되었거나 검색 결과로 반환된 server_id와 도구 이름을 사용하세요. 이 컨텍스트에 이미 설명된 도구는 다시 검색할 필요가 없습니다."
+            },
             "user": {
                 "data": {
                     "name": "Name",
