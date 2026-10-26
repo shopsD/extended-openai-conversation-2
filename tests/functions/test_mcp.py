@@ -23,6 +23,35 @@ def test_all_tools_description_explains_implicit_bounded_preview():
     assert "paginate further" in description
 
 
+def test_mcp_tool_schema_documents_actions_search_and_defaults():
+    """The shared dispatcher explains action-specific inputs to the model."""
+    tool = build_mcp_function_tool(["weather"])
+    spec = tool["spec"]
+    properties = spec["parameters"]["properties"]
+
+    assert "get_schema to retrieve" in spec["description"]
+    assert "require server_id and tool_name" in properties["action"]["description"]
+    assert "cannot expand" in properties["server_ids"]["description"]
+    assert "specific operation" in properties["server_id"]["description"]
+    assert "including a tool omitted from discovery results" in properties[
+        "tool_name"
+    ]["description"]
+    assert "May be omitted" in properties["arguments"]["description"]
+    assert properties["search_fields"]["items"]["enum"] == [
+        "server_id",
+        "server_name",
+        "tool_name",
+        "description",
+        "schema",
+    ]
+    assert "list_tools accepts only" in properties["search_fields"]["description"]
+    assert "Defaults to false" in properties["search_regex"]["description"]
+    assert "Defaults to true" in properties["include_description"]["description"]
+    assert "Defaults to 1" in properties["current_page"]["description"]
+    assert "Defaults to 20" in properties["entries_per_page"]["description"]
+    assert "hard maximum of 100" in properties["entries_per_page"]["description"]
+
+
 @pytest.mark.parametrize(
     ("action", "arguments", "method_name", "expected_arguments"),
     [
