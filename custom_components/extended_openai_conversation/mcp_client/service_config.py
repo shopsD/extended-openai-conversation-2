@@ -140,7 +140,7 @@ class MCPServiceConfig:
             )
         )
         disabled_tool_names = (
-           { 
+           {
                 tool.name
                 for tool in available_tools
                 if config._selection_matches(
@@ -176,7 +176,7 @@ class MCPServiceConfig:
             return True
         try:
             return (
-                # this disabled filter is to say any tools that match should be disabled, 
+                # this disabled filter is to say any tools that match should be disabled,
                 # so if it returns None then that means the tool is allowed
                 regex.fullmatch(self.tool_name_pattern, tool_name, timeout=self.regex_timeout)
                 is None
