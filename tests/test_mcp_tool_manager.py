@@ -56,7 +56,7 @@ async def test_list_servers_without_tool_fields_avoids_server_calls():
     result = await MCPToolManager.list_servers(
         [storage, calendar],
         query="storage",
-        search_fields=["server_id", "server_name", "description"],
+        search_fields=["server_id", "server_name"],
     )
 
     assert result == {

@@ -52,6 +52,7 @@ from .mcp_errors import (
     MCPConfigError,
     MCPProtocolError,
 )
+from .mcp_service import MCPService
 from .mcp_tool_manager import MCPToolManager
 from .mcp_utils import MCPUtils
 from .oauth import (
@@ -111,6 +112,7 @@ __all__ = [
     "MCPProtocolError",
     "MCPServerConfig",
     "MCPServerInformation",
+    "MCPService",
     "MCPServiceConfig",
     "MCPTool",
     "MCPToolManager",
