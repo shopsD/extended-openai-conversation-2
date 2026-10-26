@@ -1,5 +1,6 @@
 """Tests for host-independent MCP server listing."""
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.extended_openai_conversation.mcp_client import (
@@ -13,7 +14,12 @@ from custom_components.extended_openai_conversation.mcp_client import (
 )
 
 
-def _tool(name: str, description: str) -> MCPTool:
+def _tool(
+    name: str,
+    description: str,
+    *,
+    output_schema: dict[str, Any] | None = None,
+) -> MCPTool:
     return MCPTool(
         name=name,
         title=None,
@@ -22,7 +28,7 @@ def _tool(name: str, description: str) -> MCPTool:
             "type": "object",
             "properties": {"file_path": {"type": "string"}},
         },
-        output_schema=None,
+        output_schema=output_schema,
         definition={"name": name},
     )
 
@@ -108,8 +114,19 @@ async def test_list_servers_searches_only_discoverable_non_permanent_tools():
 
 async def test_list_servers_controls_tool_descriptions_and_schemas():
     """Tool descriptions and schemas are independently optional."""
+    output_schema = {
+        "type": "object",
+        "properties": {"success": {"type": "boolean"}},
+    }
     storage = _service(
-        "storage", tools=(_tool("upload_file", "Upload a file"),)
+        "storage",
+        tools=(
+            _tool(
+                "upload_file",
+                "Upload a file",
+                output_schema=output_schema,
+            ),
+        ),
     )
 
     result = await MCPToolManager.list_servers(
@@ -126,6 +143,7 @@ async def test_list_servers_controls_tool_descriptions_and_schemas():
                 "type": "object",
                 "properties": {"file_path": {"type": "string"}},
             },
+            "output_schema": output_schema,
         }
     ]
 
@@ -278,7 +296,13 @@ async def test_list_tools_excludes_permanent_tools_and_paginates_globally():
 
 async def test_get_schema_returns_permanent_schema_without_server_call():
     """Permanent tool schemas come from saved context without discovery."""
-    permanent = _tool("permanent_tool", "Permanent")
+    output_schema = {
+        "type": "object",
+        "properties": {"result": {"type": "string"}},
+    }
+    permanent = _tool(
+        "permanent_tool", "Permanent", output_schema=output_schema
+    )
     storage = _service(
         "storage",
         permanent_tools=(permanent,),
@@ -293,6 +317,7 @@ async def test_get_schema_returns_permanent_schema_without_server_call():
         "server_id": "storage",
         "tool_name": "permanent_tool",
         "input_schema": permanent.input_schema,
+        "output_schema": output_schema,
     }
     storage.client.list_tools.assert_not_awaited()
 

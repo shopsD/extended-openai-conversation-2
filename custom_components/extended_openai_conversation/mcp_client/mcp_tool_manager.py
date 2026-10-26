@@ -419,11 +419,14 @@ class MCPToolManager:
     @staticmethod
     def _schema_result(server_id: str, tool: MCPTool) -> dict[str, Any]:
         """Return the model-facing schema representation for one tool."""
-        return {
+        result: dict[str, Any] = {
             "server_id": server_id,
             "tool_name": tool.name,
             "input_schema": tool.input_schema,
         }
+        if tool.output_schema is not None:
+            result["output_schema"] = tool.output_schema
+        return result
 
     @staticmethod
     def _tool_result(
@@ -515,6 +518,8 @@ class MCPToolManager:
             result["description"] = tool.description
         if include_schema:
             result["input_schema"] = tool.input_schema
+            if tool.output_schema is not None:
+                result["output_schema"] = tool.output_schema
         return result
 
     @staticmethod
