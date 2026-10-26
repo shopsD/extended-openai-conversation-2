@@ -420,7 +420,7 @@ async def test_oauth_settings_confirm_discovers_metadata(hass):
     }
     with patch(
         "custom_components.extended_openai_conversation.config_flow."
-        "async_discover_mcp_oauth",
+        "MCPOAuthClientRegistrar.async_discover_mcp_oauth",
         new=AsyncMock(return_value=oauth_config),
     ) as discover_oauth:
         result = await flow.async_step_mcp_authenticate(
@@ -453,7 +453,7 @@ async def test_oauth_settings_can_return_to_service_menu(hass):
 
     with patch(
         "custom_components.extended_openai_conversation.config_flow."
-        "async_discover_mcp_oauth",
+        "MCPOAuthClientRegistrar.async_discover_mcp_oauth",
         new=AsyncMock(),
     ) as discover_oauth:
         result = await flow.async_step_mcp_authenticate(
@@ -572,7 +572,7 @@ async def test_oauth_discovery_failure_is_retained_on_service_menu(hass):
     flow._async_service_menu_status_lines.return_value = error_text
     with patch(
         "custom_components.extended_openai_conversation.config_flow."
-        "async_discover_mcp_oauth",
+        "MCPOAuthClientRegistrar.async_discover_mcp_oauth",
         new=AsyncMock(side_effect=MCPAuthenticationError("missing metadata")),
     ):
         result = await flow.async_step_mcp_authenticate(
@@ -669,7 +669,7 @@ async def test_oauth_dynamically_registers_and_imports_credentials(hass):
         ),
         patch(
             "custom_components.extended_openai_conversation.config_flow."
-            "async_register_mcp_oauth_client",
+            "MCPOAuthClientRegistrar.async_register_mcp_oauth_client",
             new=AsyncMock(return_value=registration),
         ) as register_client,
         patch(

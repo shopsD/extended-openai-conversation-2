@@ -163,14 +163,14 @@ from .mcp_client import (
     MCPClientConfigFlowResult,
     MCPConfigError,
     MCPContextEstimate,
+    MCPContextRenderer,
     MCPDiscoveryResult,
+    MCPOAuthClientRegistrar,
     MCPOAuthClientRegistration,
     MCPOAuthConfiguration,
     MCPProtocolError,
     MCPServerConfig,
     MCPServiceConfig,
-    async_discover_mcp_oauth,
-    async_register_mcp_oauth_client,
 )
 from .mcp_oauth import (
     async_get_mcp_oauth_auth,
@@ -692,7 +692,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             return await self.async_step_service_menu()
 
         try:
-            oauth_config = await async_discover_mcp_oauth(self._mcp_config.url)
+            oauth_config = await MCPOAuthClientRegistrar.async_discover_mcp_oauth(self._mcp_config.url)
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.exception("Unable to discover MCP OAuth metadata")
             self._mcp_oauth_status = False
@@ -759,7 +759,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         registration_url = self._mcp_oauth_data.get(CONF_MCP_OAUTH_REGISTRATION_URL)
         if registration_url:
             try:
-                registration = await async_register_mcp_oauth_client(
+                registration = await MCPOAuthClientRegistrar.async_register_mcp_oauth_client(
                     self._mcp_oauth_configuration(),
                     async_get_redirect_uri(self.hass),
                     client_name=(
@@ -1229,11 +1229,8 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         else:
             await self._async_test_mcp_server(run_requested_discovery=False)
 
-        estimate: MCPContextEstimate = MCPContextEstimate.estimate_permanent_context(
-            service_config.server,
-            service_config.permanent_tools,
-            include_schemas=service_config.include_permanent_schemas,
-            include_default_prompt=service_config.provide_default_prompt,
+        estimate: MCPContextEstimate = MCPContextEstimate.from_context(
+            MCPContextRenderer.render_permanent_context(service_config)
         )
 
         return self.async_show_form(

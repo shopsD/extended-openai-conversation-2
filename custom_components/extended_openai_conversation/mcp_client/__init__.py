@@ -38,7 +38,12 @@ from .mcp_const import (
     MCP_TOOL_FILTER_SELECTED,
     MCP_TOOL_FILTER_UNSELECTED,
 )
-from .mcp_context import DEFAULT_MCP_PROMPT, MCPContextEstimate
+from .mcp_context import (
+    DEFAULT_MCP_PROMPT,
+    MCPContextEstimate,
+    MCPContextRenderer,
+    MCPRenderedContext,
+)
 from .mcp_datatypes import (
     MCPDiscoveryResult,
     MCPServerInformation,
@@ -56,10 +61,9 @@ from .mcp_service import MCPService
 from .mcp_tool_manager import MCPToolManager
 from .mcp_utils import MCPUtils
 from .oauth import (
+    MCPOAuthClientRegistrar,
     MCPOAuthClientRegistration,
     MCPOAuthConfiguration,
-    async_discover_mcp_oauth,
-    async_register_mcp_oauth_client,
 )
 from .service_config import MCPServiceConfig
 
@@ -106,10 +110,13 @@ __all__ = [
     "MCPClientError",
     "MCPConfigError",
     "MCPContextEstimate",
+    "MCPContextRenderer",
     "MCPDiscoveryResult",
+    "MCPOAuthClientRegistrar",
     "MCPOAuthClientRegistration",
     "MCPOAuthConfiguration",
     "MCPProtocolError",
+    "MCPRenderedContext",
     "MCPServerConfig",
     "MCPServerInformation",
     "MCPService",
@@ -118,6 +125,4 @@ __all__ = [
     "MCPToolManager",
     "MCPToolResult",
     "MCPUtils",
-    "async_discover_mcp_oauth",
-    "async_register_mcp_oauth_client",
 ]

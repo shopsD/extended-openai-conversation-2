@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import probatio as vol
 
@@ -15,6 +15,11 @@ from custom_components.extended_openai_conversation.entity import (
     _make_tool_result_content,
     _render_extra_body,
     encode_attachments,
+)
+from custom_components.extended_openai_conversation.mcp_client import (
+    MCPServerConfig,
+    MCPServiceConfig,
+    MCPTool,
 )
 from homeassistant.components import conversation
 from homeassistant.helpers import llm
@@ -66,6 +71,83 @@ def _entity_for_stream() -> ExtendedOpenAIBaseLLMEntity:
     entity.subentry = MagicMock()
     entity.subentry.data = {}
     return entity
+
+
+def test_mcp_context_messages_use_assigned_saved_catalogue():
+    """Assigned MCP context is rendered from saved data without discovery."""
+    entity = ExtendedOpenAIBaseLLMEntity.__new__(ExtendedOpenAIBaseLLMEntity)
+    entity.hass = MagicMock()
+    entity.subentry = MagicMock()
+    entity.subentry.data = {"mcp_servers": ["vault"]}
+    tool = MCPTool(
+        name="read_secret",
+        title="Read secret",
+        description="Read a stored secret.",
+        input_schema={"type": "object"},
+        output_schema={"type": "object"},
+        definition={"name": "read_secret"},
+    )
+    disabled_tool = MCPTool(
+        name="delete_secret",
+        title="Delete secret",
+        description="Delete a stored secret.",
+        input_schema={"type": "object"},
+        output_schema=None,
+        definition={"name": "delete_secret"},
+    )
+    service = MagicMock()
+    service.config = MCPServiceConfig(
+        server=MCPServerConfig(
+            server_id="vault",
+            name="Vault MCP",
+            url="https://vault.example.com/mcp",
+        ),
+        permanent_tools=(tool, disabled_tool),
+        include_permanent_schemas=True,
+        provide_default_prompt=True,
+        disabled_tools=("delete_secret",),
+    )
+    scope = MagicMock()
+    scope.list_loaded.return_value = (service,)
+    manager = MagicMock()
+    manager.scope.return_value = scope
+
+    with patch(
+        "custom_components.extended_openai_conversation.entity.MCPServiceManager",
+        return_value=manager,
+    ):
+        messages = entity._get_mcp_context_messages()
+
+    manager.scope.assert_called_once_with(["vault"])
+    scope.list_loaded.assert_called_once_with()
+    assert len(messages) == 1
+    assert messages[0]["role"] == "system"
+    context = json.loads(messages[0]["content"])
+    assert context["server_id"] == "vault"
+    assert context["tools"] == [
+        {
+            "description": "Read a stored secret.",
+            "input_schema": {"type": "object"},
+            "name": "read_secret",
+            "output_schema": {"type": "object"},
+        }
+    ]
+    assert "permanent" not in context["instructions"]
+
+
+def test_mcp_context_messages_skip_manager_without_assigned_servers():
+    """An agent without assigned MCP servers receives no MCP context."""
+    entity = ExtendedOpenAIBaseLLMEntity.__new__(ExtendedOpenAIBaseLLMEntity)
+    entity.hass = MagicMock()
+    entity.subentry = MagicMock()
+    entity.subentry.data = {}
+
+    with patch(
+        "custom_components.extended_openai_conversation.entity.MCPServiceManager"
+    ) as manager:
+        assert entity._get_mcp_context_messages() == []
+
+    manager.assert_not_called()
 
 
 async def _collect_stream_deltas(chunks: list[SimpleNamespace]) -> list[dict]:

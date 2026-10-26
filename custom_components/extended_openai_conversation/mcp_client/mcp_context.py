@@ -6,44 +6,53 @@ from dataclasses import dataclass
 import json
 import math
 
-from .config import MCPServerConfig
-from .mcp_datatypes import MCPTool
+from .service_config import MCPServiceConfig
 
 DEFAULT_MCP_PROMPT = (
-    "Use list_servers to find available MCP servers, list_tools to discover "
-    "tools, and execute_tool to run a tool. Use the server_id and tool name "
-    "returned by discovery. Tools already supplied in permanent context do not "
-    "need to be discovered again."
+    "Use the MCP dispatcher with list_servers to find available servers, "
+    "list_tools to discover tools, get_schema to retrieve a tool's complete "
+    "schema, and execute_tool to run it. Use the server_id and tool name provided "
+    "in this context or returned by discovery. Tools already described in this "
+    "context do not need to be discovered again."
 )
 
 
 @dataclass(frozen=True, slots=True)
-class MCPContextEstimate:
-    """Size information for one rendered permanent MCP context block."""
+class MCPRenderedContext:
+    """Model-facing context rendered from one MCP service configuration."""
 
     content: str
+    selected_tool_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class MCPContextEstimate:
+    """Display-only size information for one rendered MCP context block."""
+
     selected_tool_count: int
     character_count: int
     byte_count: int
     estimated_tokens: int
 
+    @classmethod
+    def from_context(cls, context: MCPRenderedContext) -> MCPContextEstimate:
+        """Estimate the size of already-rendered model context."""
+        byte_count = len(context.content.encode("utf-8"))
+        return cls(
+            selected_tool_count=context.selected_tool_count,
+            character_count=len(context.content),
+            byte_count=byte_count,
+            estimated_tokens=math.ceil(byte_count / 4),
+        )
+
+class MCPContextRenderer:
     @staticmethod
-    def estimate_permanent_context(
-        config: MCPServerConfig,
-        tools: tuple[MCPTool, ...],
-        *,
-        include_schemas: bool,
-        include_default_prompt: bool = False,
-    ) -> MCPContextEstimate:
-        """Render permanent tool context and return its approximate token cost."""
-        if not tools and not include_default_prompt:
-            return MCPContextEstimate(
-                content="",
-                selected_tool_count=0,
-                character_count=0,
-                byte_count=0,
-                estimated_tokens=0,
-            )
+    def render_permanent_context(config: MCPServiceConfig) -> MCPRenderedContext:
+        """Render stable model context without calculating display estimates."""
+
+        tools = config.filter_allowed_tools(config.permanent_tools)
+        if not tools and not config.provide_default_prompt:
+            return MCPRenderedContext(content="", selected_tool_count=0)
 
         rendered_tools: list[dict[str, object]] = []
         for tool in sorted(tools, key=lambda item: item.name):
@@ -51,30 +60,27 @@ class MCPContextEstimate:
                 "name": tool.name,
                 "description": tool.description,
             }
-            if include_schemas:
+            if config.include_permanent_schemas:
                 rendered_tool["input_schema"] = tool.input_schema
+                if tool.output_schema is not None:
+                    rendered_tool["output_schema"] = tool.output_schema
             rendered_tools.append(rendered_tool)
 
         context: dict[str, object] = {
-            "server_id": config.server_id,
-            "server_name": config.name,
-            "server_description": config.description,
+            "server_id": config.server.server_id,
+            "server_name": config.server.name,
+            "server_description": config.server.description,
             "tools": rendered_tools,
         }
-        if include_default_prompt:
+        if config.provide_default_prompt:
             context["instructions"] = DEFAULT_MCP_PROMPT
 
-        content = json.dumps(
-            context,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        byte_count = len(content.encode("utf-8"))
-        return MCPContextEstimate(
-            content=content,
+        return MCPRenderedContext(
+            content=json.dumps(
+                context,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
             selected_tool_count=len(tools),
-            character_count=len(content),
-            byte_count=byte_count,
-            estimated_tokens=math.ceil(byte_count / 4),
         )

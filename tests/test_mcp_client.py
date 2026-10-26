@@ -6,6 +6,7 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPClientConfigFlow,
     MCPConfigError,
     MCPContextEstimate,
+    MCPContextRenderer,
     MCPDiscoveryResult,
     MCPServerConfig,
     MCPServerInformation,
@@ -312,21 +313,39 @@ def test_permanent_context_estimate_uses_the_rendered_schema_content():
                 "type": "object",
                 "properties": {"key": {"type": "string"}},
             },
-            output_schema=None,
+            output_schema={
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+            },
             definition={"name": "read_secret"},
         ),
     )
 
-    metadata_only = MCPContextEstimate.estimate_permanent_context(
-        config, tools, include_schemas=False
+    metadata_context = MCPContextRenderer.render_permanent_context(
+        MCPServiceConfig(
+            server=config,
+            permanent_tools=tools,
+            include_permanent_schemas=False,
+            provide_default_prompt=True,
+        )
     )
-    with_schemas = MCPContextEstimate.estimate_permanent_context(
-        config, tools, include_schemas=True
+    schema_context = MCPContextRenderer.render_permanent_context(
+        MCPServiceConfig(
+            server=config,
+            permanent_tools=tools,
+            include_permanent_schemas=True,
+            provide_default_prompt=True,
+        )
     )
+    metadata_only = MCPContextEstimate.from_context(metadata_context)
+    with_schemas = MCPContextEstimate.from_context(schema_context)
 
     assert metadata_only.selected_tool_count == 1
-    assert '"input_schema"' not in metadata_only.content
-    assert '"input_schema"' in with_schemas.content
+    assert '"input_schema"' not in metadata_context.content
+    assert '"output_schema"' not in metadata_context.content
+    assert '"input_schema"' in schema_context.content
+    assert '"output_schema"' in schema_context.content
+    assert "permanent" not in schema_context.content
     assert with_schemas.character_count > metadata_only.character_count
     assert with_schemas.byte_count > metadata_only.byte_count
     assert with_schemas.estimated_tokens > metadata_only.estimated_tokens

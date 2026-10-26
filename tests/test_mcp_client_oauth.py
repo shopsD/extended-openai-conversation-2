@@ -5,9 +5,8 @@ import pytest
 
 from custom_components.extended_openai_conversation.mcp_client import (
     MCPAuthenticationError,
+    MCPOAuthClientRegistrar,
     MCPOAuthConfiguration,
-    async_discover_mcp_oauth,
-    async_register_mcp_oauth_client,
 )
 
 
@@ -38,7 +37,7 @@ async def test_oauth_discovery_retains_issuer_and_registration_endpoint():
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await async_discover_mcp_oauth(
+        result = await MCPOAuthClientRegistrar.async_discover_mcp_oauth(
             "https://mcp.example.com/api", http_client=client
         )
 
@@ -65,7 +64,7 @@ async def test_dynamic_client_registration_returns_credentials():
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await async_register_mcp_oauth_client(
+        result = await MCPOAuthClientRegistrar.async_register_mcp_oauth_client(
             MCPOAuthConfiguration(
                 authorization_url="https://auth.example.com/authorize",
                 token_url="https://auth.example.com/token",
@@ -86,7 +85,7 @@ async def test_dynamic_client_registration_returns_credentials():
 async def test_dynamic_client_registration_requires_advertised_endpoint():
     """The client does not guess or write to an unadvertised endpoint."""
     with pytest.raises(MCPAuthenticationError):
-        await async_register_mcp_oauth_client(
+        await MCPOAuthClientRegistrar.async_register_mcp_oauth_client(
             MCPOAuthConfiguration(
                 authorization_url="https://auth.example.com/authorize",
                 token_url="https://auth.example.com/token",
@@ -106,7 +105,7 @@ async def test_oauth_discovery_preserves_http_failure_cause():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(MCPAuthenticationError) as caught:
-            await async_discover_mcp_oauth(
+            await MCPOAuthClientRegistrar.async_discover_mcp_oauth(
                 "https://mcp.example.com/api", http_client=client
             )
 

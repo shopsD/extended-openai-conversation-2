@@ -17,6 +17,7 @@ from openai.types.chat import (
     ChatCompletionContentPartImageParam,
     ChatCompletionContentPartTextParam,
     ChatCompletionMessageParam,
+    ChatCompletionSystemMessageParam,
     ChatCompletionToolParam,
     ChatCompletionUserMessageParam,
 )
@@ -62,6 +63,8 @@ from .exceptions import FunctionNotFound, ParseArgumentsFailed, TokenLengthExcee
 from .functions import get_function
 from .functions.mcp import build_mcp_function_tool
 from .helpers import async_create_chat_completion, get_model_config
+from .mcp_client import MCPContextRenderer
+from .mcp_service_manager import MCPServiceManager
 
 if TYPE_CHECKING:
     from . import ExtendedOpenAIConfigEntry
@@ -383,6 +386,25 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
             return []
         return [build_mcp_function_tool(server_ids)]
 
+    def _get_mcp_context_messages(self) -> list[ChatCompletionSystemMessageParam]:
+        """Return stable context for configured tools already known to the agent."""
+        server_ids = self.subentry.data.get(CONF_MCP_SERVERS, []) or []
+        if not server_ids:
+            return []
+
+        services = MCPServiceManager(self.hass).scope(server_ids).list_loaded()
+        messages: list[ChatCompletionSystemMessageParam] = []
+        for service in services:
+            context = MCPContextRenderer.render_permanent_context(service.config)
+            if context.content:
+                messages.append(
+                    ChatCompletionSystemMessageParam(
+                        role="system",
+                        content=context.content,
+                    )
+                )
+        return messages
+
     async def _async_handle_chat_log(
         self,
         chat_log: conversation.ChatLog,
@@ -415,9 +437,13 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
             encode_attachments, chat_log.content
         )
 
-        messages = _convert_content_to_param(
-            chat_log.content, shorten_tool_call_id, attachment_parts
-        )
+        mcp_context_messages = self._get_mcp_context_messages()
+        messages: list[ChatCompletionMessageParam] = [
+            *mcp_context_messages,
+            *_convert_content_to_param(
+                chat_log.content, shorten_tool_call_id, attachment_parts
+            ),
+        ]
 
         # Build functions list from custom functions
         tools: list[ChatCompletionToolParam] = [
@@ -548,9 +574,12 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
                 chat_log.async_add_assistant_content_without_tools(tool_result_content)
 
             # Update messages for next iteration
-            messages = _convert_content_to_param(
-                chat_log.content, shorten_tool_call_id, attachment_parts
-            )
+            messages = [
+                *mcp_context_messages,
+                *_convert_content_to_param(
+                    chat_log.content, shorten_tool_call_id, attachment_parts
+                ),
+            ]
 
             # Check if we need to continue (if there are pending tool results)
             if not chat_log.unresponded_tool_results:
