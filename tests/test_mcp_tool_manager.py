@@ -273,3 +273,77 @@ async def test_list_tools_excludes_permanent_tools_and_paginates_globally():
     assert result["tools"][0]["tool_name"] == "tool_two"
     assert result["max_matches"] == 2
     assert result["max_pages"] == 2
+
+
+async def test_get_schema_returns_permanent_schema_without_server_call():
+    """Permanent tool schemas come from saved context without discovery."""
+    permanent = _tool("permanent_tool", "Permanent")
+    storage = _service(
+        "storage",
+        permanent_tools=(permanent,),
+        on_demand_discovery=False,
+    )
+
+    result = await MCPToolManager.get_schema(
+        [storage], server_id="storage", tool_name="permanent_tool"
+    )
+
+    assert result == {
+        "server_id": "storage",
+        "tool_name": "permanent_tool",
+        "input_schema": permanent.input_schema,
+    }
+    storage.client.list_tools.assert_not_awaited()
+
+
+async def test_get_schema_discovers_non_permanent_tool():
+    """A discoverable tool schema is retrieved from the live catalogue."""
+    upload = _tool("upload_file", "Upload a file")
+    storage = _service("storage", tools=(upload,))
+
+    result = await MCPToolManager.get_schema(
+        [storage], server_id="storage", tool_name="upload_file"
+    )
+
+    assert result["input_schema"] == upload.input_schema
+    storage.client.list_tools.assert_awaited_once_with()
+
+
+async def test_get_schema_hides_unassigned_server():
+    """An unassigned server returns the same result as an unknown tool."""
+    storage = _service("storage")
+
+    result = await MCPToolManager.get_schema(
+        [storage], server_id="not-assigned", tool_name="upload_file"
+    )
+
+    assert result == {
+        "error": {"code": "tool_not_found", "message": "Tool was not found"}
+    }
+    storage.client.list_tools.assert_not_awaited()
+
+
+async def test_get_schema_hides_tool_when_discovery_is_disabled():
+    """Non-permanent tools cannot be retrieved without on-demand discovery."""
+    storage = _service(
+        "storage",
+        on_demand_discovery=False,
+        tools=(_tool("upload_file", "Upload a file"),),
+    )
+
+    result = await MCPToolManager.get_schema(
+        [storage], server_id="storage", tool_name="upload_file"
+    )
+
+    assert result["error"]["code"] == "tool_not_found"
+    storage.client.list_tools.assert_not_awaited()
+
+
+async def test_get_schema_validates_identifiers():
+    """Invalid identifiers are rejected before examining services."""
+    assert (
+        await MCPToolManager.get_schema([], server_id="", tool_name="tool")
+    )["error"]["code"] == "invalid_server_id"
+    assert (
+        await MCPToolManager.get_schema([], server_id="server", tool_name="")
+    )["error"]["code"] == "invalid_tool_name"

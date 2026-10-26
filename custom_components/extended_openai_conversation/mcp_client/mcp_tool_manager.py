@@ -195,6 +195,46 @@ class MCPToolManager:
         )
 
     @staticmethod
+    async def get_schema(
+        services: Collection[MCPService],
+        *,
+        server_id: str,
+        tool_name: str,
+    ) -> dict[str, Any]:
+        """Return the complete input schema for one authorized MCP tool."""
+        if not isinstance(server_id, str) or not server_id:
+            return MCPToolManager._error("invalid_server_id", "server_id must be a non-empty string")
+        if not isinstance(tool_name, str) or not tool_name:
+            return MCPToolManager._error("invalid_tool_name", "tool_name must be a non-empty string")
+
+        service = MCPToolManager._service_by_id(services, server_id)
+        if service is None:
+            return MCPToolManager._tool_not_found()
+
+        permanent_tool = next(
+            (
+                tool
+                for tool in service.config.permanent_tools
+                if tool.name == tool_name and service.config.tool_allowed(tool.name)
+            ),
+            None,
+        )
+        if permanent_tool is not None:
+            return MCPToolManager._schema_result(server_id, permanent_tool)
+
+        discoverable_tool = next(
+            (
+                tool
+                for tool in await MCPToolManager._discoverable_tools(service)
+                if tool.name == tool_name
+            ),
+            None,
+        )
+        if discoverable_tool is None:
+            return MCPToolManager._tool_not_found()
+        return MCPToolManager._schema_result(server_id, discoverable_tool)
+
+    @staticmethod
     def _prepare_search(
         *,
         search_fields: Collection[str] | None,
@@ -326,6 +366,34 @@ class MCPToolManager:
         if not service.config.on_demand_discovery:
             return ()
         return service.config.filter_on_demand_tools(await service.client.list_tools())
+
+    @staticmethod
+    def _service_by_id(
+        services: Collection[MCPService], server_id: str
+    ) -> MCPService | None:
+        """Return an authorized service by stable ID without leaking others."""
+        return next(
+            (
+                service
+                for service in services
+                if service.config.server.server_id == server_id
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _schema_result(server_id: str, tool: MCPTool) -> dict[str, Any]:
+        """Return the model-facing schema representation for one tool."""
+        return {
+            "server_id": server_id,
+            "tool_name": tool.name,
+            "input_schema": tool.input_schema,
+        }
+
+    @staticmethod
+    def _tool_not_found() -> dict[str, Any]:
+        """Return a generic result that does not reveal authorization state."""
+        return MCPToolManager._error("tool_not_found", "Tool was not found")
 
     @staticmethod
     def _server_search_values(config: MCPServiceConfig, fields: Collection[str]) -> tuple[str, ...]:
