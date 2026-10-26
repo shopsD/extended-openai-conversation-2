@@ -244,7 +244,7 @@ class ExtendedOpenAIAgentEntity(
                                 function_config
                             )
 
-            return function_tools or []
+            return (function_tools or []) + self._get_mcp_function_tools()
         except (InvalidFunction, FunctionNotFound) as e:
             raise e
         except Exception as e:

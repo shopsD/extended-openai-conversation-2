@@ -39,6 +39,7 @@ from .const import (
     CONF_EXTRA_BODY,
     CONF_MAX_FUNCTION_CALLS_PER_CONVERSATION,
     CONF_MAX_TOKENS,
+    CONF_MCP_SERVERS,
     CONF_REASONING_EFFORT,
     CONF_SERVICE_TIER,
     CONF_SHORTEN_TOOL_CALL_ID,
@@ -59,6 +60,7 @@ from .const import (
 )
 from .exceptions import FunctionNotFound, ParseArgumentsFailed, TokenLengthExceededError
 from .functions import get_function
+from .functions.mcp import build_mcp_function_tool
 from .helpers import async_create_chat_completion, get_model_config
 
 if TYPE_CHECKING:
@@ -373,6 +375,13 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
         if not isinstance(client, AsyncClient):
             raise TypeError("An OpenAI entity requires an OpenAI client")
         return client
+
+    def _get_mcp_function_tools(self) -> list[dict[str, Any]]:
+        """Return the MCP dispatcher when servers are assigned to this agent."""
+        server_ids = self.subentry.data.get(CONF_MCP_SERVERS, []) or []
+        if not server_ids:
+            return []
+        return [build_mcp_function_tool(server_ids)]
 
     async def _async_handle_chat_log(
         self,

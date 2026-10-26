@@ -38,6 +38,115 @@ _LIST_TOOLS_ARGUMENTS = (
 )
 
 
+def build_mcp_function_tool(server_ids: list[str]) -> dict[str, Any]:
+    """Build the model-facing MCP dispatcher definition for an agent."""
+    return {
+        "spec": {
+            "name": "mcp",
+            "description": (
+                "Discover MCP servers and tools, retrieve tool schemas, or execute "
+                "a tool. Use list_servers or list_tools before execution when the "
+                "required server, tool, or arguments are unknown."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "list_servers",
+                            "list_tools",
+                            "get_schema",
+                            "execute_tool",
+                        ],
+                        "description": "The MCP operation to perform.",
+                    },
+                    "server_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "For list_tools only, restrict results to these server "
+                            "IDs. IDs outside the agent's assigned scope return no "
+                            "results."
+                        ),
+                    },
+                    "server_id": {
+                        "type": "string",
+                        "description": (
+                            "Server ID for get_schema or execute_tool."
+                        ),
+                    },
+                    "tool_name": {
+                        "type": "string",
+                        "description": (
+                            "Tool name for get_schema or execute_tool."
+                        ),
+                    },
+                    "arguments": {
+                        "type": "object",
+                        "description": (
+                            "Tool arguments for execute_tool, following the tool's "
+                            "input schema."
+                        ),
+                        "additionalProperties": True,
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional server or tool search query.",
+                    },
+                    "search_fields": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional fields in which to search.",
+                    },
+                    "search_regex": {
+                        "type": "boolean",
+                        "description": "Interpret query as a regular expression.",
+                    },
+                    "search_case_sensitive": {
+                        "type": "boolean",
+                        "description": "Perform a case-sensitive search.",
+                    },
+                    "include_tools": {
+                        "type": "boolean",
+                        "description": (
+                            "For list_servers, include matching tool summaries."
+                        ),
+                    },
+                    "all_tools": {
+                        "type": "boolean",
+                        "description": (
+                            "For list_servers, include all eligible tools from each "
+                            "matching server."
+                        ),
+                    },
+                    "include_description": {
+                        "type": "boolean",
+                        "description": "Include tool descriptions in results.",
+                    },
+                    "include_schema": {
+                        "type": "boolean",
+                        "description": "Include tool input schemas in results.",
+                    },
+                    "current_page": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Result page to return.",
+                    },
+                    "entries_per_page": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "description": "Results per page, up to 100.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+        "function": {"type": "mcp", "server_ids": list(server_ids)},
+    }
+
+
 class MCPFunction(Function):
     """Dispatch MCP actions over the servers assigned to an agent."""
 

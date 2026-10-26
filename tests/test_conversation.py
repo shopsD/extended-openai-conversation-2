@@ -109,6 +109,30 @@ def test_get_function_tools_returns_default_when_unconfigured():
     assert tools == DEFAULT_CONF_FUNCTION_TOOLS
 
 
+def test_get_function_tools_adds_mcp_for_assigned_servers():
+    """Assigned MCP servers add one scoped dispatcher to the agent tools."""
+    from custom_components.extended_openai_conversation.const import (
+        CONF_FUNCTION_TOOLS,
+        CONF_MCP_SERVERS,
+    )
+
+    subentry = _mock_subentry("conversation", "sub_1")
+    subentry.data = {
+        CONF_FUNCTION_TOOLS: "[]",
+        CONF_MCP_SERVERS: ["weather", "home"],
+    }
+    entity = ExtendedOpenAIAgentEntity(MagicMock(), subentry)
+
+    tools = entity._get_function_tools()
+
+    assert len(tools) == 1
+    assert tools[0]["spec"]["name"] == "mcp"
+    assert tools[0]["function"] == {
+        "type": "mcp",
+        "server_ids": ["weather", "home"],
+    }
+
+
 def test_get_function_tools_parses_custom_yaml():
     """A custom function_tools YAML string is parsed and validated."""
     from custom_components.extended_openai_conversation.const import CONF_FUNCTION_TOOLS
