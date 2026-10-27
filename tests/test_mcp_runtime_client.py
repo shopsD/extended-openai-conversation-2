@@ -11,6 +11,8 @@ from mcp.types import (
     ServerCapabilities,
     TextContent,
     Tool,
+    ToolAnnotations,
+    ToolExecution,
 )
 import pytest
 
@@ -92,8 +94,17 @@ async def test_list_tools_exhausts_sdk_cursor_pages():
             tools=[
                 Tool(
                     name="upload_file",
+                    title="Upload file",
                     description="Upload a file.",
                     inputSchema={"type": "object"},
+                    outputSchema={"type": "object"},
+                    annotations=ToolAnnotations(
+                        readOnlyHint=False,
+                        destructiveHint=True,
+                        idempotentHint=False,
+                        openWorldHint=True,
+                    ),
+                    execution=ToolExecution(taskSupport="optional"),
                 )
             ],
             nextCursor="page-2",
@@ -121,7 +132,15 @@ async def test_list_tools_exhausts_sdk_cursor_pages():
         call(cursor="page-2"),
     ]
     assert [tool.name for tool in tools] == ["upload_file", "download_file"]
-    assert tools[0].definition["inputSchema"] == {"type": "object"}
+    assert tools[0].input_schema == {"type": "object"}
+    assert tools[0].output_schema == {"type": "object"}
+    assert tools[0].annotations == {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+    assert tools[0].task_support == "optional"
 
 
 async def test_list_tools_rejects_repeated_cursor():

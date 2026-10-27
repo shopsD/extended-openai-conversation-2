@@ -114,13 +114,19 @@ class MCPClient:
 
     def _tool_definition(self, tool: Tool) -> MCPTool:
         """Return serializable tool definitions"""
+        annotations = (
+            tool.annotations.model_dump(mode="json", by_alias=True, exclude_none=True)
+            if tool.annotations is not None
+            else None
+        )
         return MCPTool(
             name=tool.name,
             title=tool.title,
             description=tool.description,
             input_schema=dict(tool.inputSchema),
             output_schema=dict(tool.outputSchema) if tool.outputSchema is not None else None,
-            definition=tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+            annotations=annotations or None,
+            task_support=tool.execution.taskSupport if tool.execution is not None else None,
         )
 
     def _tool_result(self, result: CallToolResult) -> MCPToolResult:

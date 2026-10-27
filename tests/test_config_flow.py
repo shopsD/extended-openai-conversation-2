@@ -913,7 +913,6 @@ async def test_requested_initial_discovery_caches_catalogue(hass):
                 description="Read a stored secret.",
                 input_schema={"type": "object"},
                 output_schema=None,
-                definition={"name": "read_secret"},
             ),
         ),
     )
@@ -964,7 +963,6 @@ async def test_filter_tools_step_displays_catalogue_policy_options(hass):
                 description="Read a stored secret.",
                 input_schema={"type": "object"},
                 output_schema=None,
-                definition={"name": "read_secret"},
             ),
             MCPTool(
                 name="write_secret",
@@ -972,7 +970,6 @@ async def test_filter_tools_step_displays_catalogue_policy_options(hass):
                 description="Write a stored secret.",
                 input_schema={"type": "object"},
                 output_schema=None,
-                definition={"name": "write_secret"},
             ),
         ),
     )
@@ -1065,7 +1062,6 @@ async def test_filter_submission_can_be_reviewed_and_saved(hass):
                     "properties": {"key": {"type": "string"}},
                 },
                 output_schema=None,
-                definition={"name": "read_secret"},
             ),
         ),
     )
@@ -1227,7 +1223,6 @@ async def test_mcp_filter_tools_rejects_permanent_disabled_conflict(hass):
         description="Read a stored secret.",
         input_schema={"type": "object"},
         output_schema=None,
-        definition={"name": "read_secret"},
     )
     flow._mcp_discovery = MCPDiscoveryResult(
         server=MCPServerInformation(

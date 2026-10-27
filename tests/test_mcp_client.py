@@ -63,7 +63,8 @@ def test_service_config_round_trips_complete_permanent_catalogue():
             "properties": {"key": {"type": "string"}},
         },
         output_schema={"type": "object"},
-        definition={"name": "read_secret", "inputSchema": {"type": "object"}},
+        annotations={"readOnlyHint": True},
+        task_support="optional",
     )
     config = MCPServiceConfig(
         server=MCPServerConfig(
@@ -94,7 +95,20 @@ def test_service_config_round_trips_complete_permanent_catalogue():
     assert persisted["permanent_tool_catalogue"][0]["input_schema"] == (
         tool.input_schema
     )
+    assert "definition" not in persisted["permanent_tool_catalogue"][0]
     assert MCPServiceConfig.from_dict(persisted) == config
+
+    legacy_tool = {
+        key: value
+        for key, value in tool.to_dict().items()
+        if key not in {"annotations", "task_support"}
+    }
+    legacy_tool["definition"] = {
+        "name": "read_secret",
+        "annotations": {"readOnlyHint": True},
+        "execution": {"taskSupport": "optional"},
+    }
+    assert MCPTool.from_dict(legacy_tool) == tool
 
 
 def test_service_config_selection_keeps_only_selected_tool_snapshots():
@@ -111,7 +125,6 @@ def test_service_config_selection_keeps_only_selected_tool_snapshots():
             description=None,
             input_schema={"type": "object"},
             output_schema=None,
-            definition={"name": name},
         )
         for name in ("read_secret", "write_secret")
     )
@@ -159,7 +172,6 @@ def test_service_config_applies_filters_only_to_on_demand_tools():
             description=None,
             input_schema={"type": "object"},
             output_schema=None,
-            definition={"name": name},
         )
         for name in ("read_secret", "read_public", "write_secret")
     )
@@ -271,7 +283,6 @@ def test_service_config_rejects_permanent_disabled_tool_conflict():
         description=None,
         input_schema={"type": "object"},
         output_schema=None,
-        definition={"name": "write_secret"},
     )
     discovery = MCPDiscoveryResult(
         server=MCPServerInformation(
@@ -317,7 +328,6 @@ def test_empty_disabled_selection_does_not_conflict_with_permanent_tools():
         description=None,
         input_schema={"type": "object"},
         output_schema=None,
-        definition={"name": "write_secret"},
     )
     discovery = MCPDiscoveryResult(
         server=MCPServerInformation(
@@ -470,7 +480,6 @@ def test_permanent_context_estimate_uses_the_rendered_schema_content():
                 "type": "object",
                 "properties": {"value": {"type": "string"}},
             },
-            definition={"name": "read_secret"},
         ),
     )
 

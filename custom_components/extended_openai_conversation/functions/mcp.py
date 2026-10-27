@@ -45,8 +45,9 @@ def build_mcp_function_tool(server_ids: list[str]) -> dict[str, Any]:
             "name": "mcp",
             "description": (
                 "Use list_servers to discover servers, list_tools to search "
-                "discoverable tools, get_schema to retrieve a specific authorised "
-                "tool's complete schema, or execute_tool to invoke it. Use discovery "
+                "discoverable tools, get_tool_details to retrieve all available "
+                "details for a specific authorised tool, or execute_tool to invoke "
+                "it. Use discovery "
                 "before execution when the required server, tool, or arguments are "
                 "unknown."
             ),
@@ -58,11 +59,11 @@ def build_mcp_function_tool(server_ids: list[str]) -> dict[str, Any]:
                         "enum": [
                             "list_servers",
                             "list_tools",
-                            "get_schema",
+                            "get_tool_details",
                             "execute_tool",
                         ],
                         "description": (
-                            "The MCP operation to perform. get_schema and "
+                            "The MCP operation to perform. get_tool_details and "
                             "execute_tool require server_id and tool_name."
                         ),
                     },
@@ -78,7 +79,7 @@ def build_mcp_function_tool(server_ids: list[str]) -> dict[str, Any]:
                     "server_id": {
                         "type": "string",
                         "description": (
-                            "The single target server ID required by get_schema and "
+                            "The single target server ID required by get_tool_details and "
                             "execute_tool. Unlike server_ids, this identifies the "
                             "target of a specific operation."
                         ),
@@ -86,9 +87,14 @@ def build_mcp_function_tool(server_ids: list[str]) -> dict[str, Any]:
                     "tool_name": {
                         "type": "string",
                         "description": (
-                            "The tool name required by get_schema and execute_tool. "
-                            "get_schema works for any authorised tool, including a "
-                            "tool omitted from discovery results."
+                            "The tool name required by get_tool_details and "
+                            "execute_tool. get_tool_details works for any authorised "
+                            "tool, including a tool omitted from discovery results. It "
+                            "returns the input schema and any available title, "
+                            "description, output schema, MCP annotations (such as "
+                            "read-only, destructive, idempotent, and open-world "
+                            "hints), and task-support status. Details the server does "
+                            "not provide are omitted."
                         ),
                     },
                     "arguments": {
@@ -217,7 +223,7 @@ class MCPFunction(Function):
         if action not in {
             "list_servers",
             "list_tools",
-            "get_schema",
+            "get_tool_details",
             "execute_tool",
         }:
             return {
@@ -251,8 +257,8 @@ class MCPFunction(Function):
                 },
             )
 
-        if action == "get_schema":
-            return await MCPToolManager.get_schema(
+        if action == "get_tool_details":
+            return await MCPToolManager.get_tool_details(
                 services,
                 server_id=arguments.get("server_id", ""),
                 tool_name=arguments.get("tool_name", ""),

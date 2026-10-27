@@ -10,9 +10,9 @@ from .service_config import MCPServiceConfig
 
 DEFAULT_MCP_PROMPT = (
     "Use the MCP dispatcher with list_servers to find available servers, "
-    "list_tools to discover tools, get_schema to retrieve a tool's complete "
-    "schema, and execute_tool to run it. Use the server_id and tool name provided "
-    "in this context or returned by discovery. Tools already described in this "
+    "list_tools to discover tools, get_tool_details to retrieve all available "
+    "details for a tool, and execute_tool to run it. Use the server_id and tool name "
+    "provided in this context or returned by discovery. Tools already described in this "
     "context do not need to be discovered again."
 )
 

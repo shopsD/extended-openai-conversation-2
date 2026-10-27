@@ -197,13 +197,13 @@ class MCPToolManager:
         )
 
     @staticmethod
-    async def get_schema(
+    async def get_tool_details(
         services: Collection[MCPService],
         *,
         server_id: str,
         tool_name: str,
     ) -> dict[str, Any]:
-        """Return the complete input schema for one authorized MCP tool."""
+        """Return all available details for one authorized MCP tool."""
         if not isinstance(server_id, str) or not server_id:
             return MCPToolManager._error("invalid_server_id", "server_id must be a non-empty string")
         if not isinstance(tool_name, str) or not tool_name:
@@ -216,7 +216,7 @@ class MCPToolManager:
         tool = await MCPToolManager._find_tool(service, tool_name)
         if tool is None:
             return MCPToolManager._tool_not_found()
-        return MCPToolManager._schema_result(server_id, tool)
+        return MCPToolManager._tool_details_result(server_id, tool)
 
     @staticmethod
     async def execute_tool(
@@ -419,15 +419,23 @@ class MCPToolManager:
         )
 
     @staticmethod
-    def _schema_result(server_id: str, tool: MCPTool) -> dict[str, Any]:
-        """Return the model-facing schema representation for one tool."""
+    def _tool_details_result(server_id: str, tool: MCPTool) -> dict[str, Any]:
+        """Return all known model-facing details for one tool."""
         result: dict[str, Any] = {
             "server_id": server_id,
             "tool_name": tool.name,
             "input_schema": tool.input_schema,
         }
+        if tool.title is not None:
+            result["title"] = tool.title
+        if tool.description is not None:
+            result["description"] = tool.description
         if tool.output_schema is not None:
             result["output_schema"] = tool.output_schema
+        if tool.annotations:
+            result["annotations"] = tool.annotations
+        if tool.task_support is not None:
+            result["execution"] = {"task_support": tool.task_support}
         return result
 
     @staticmethod

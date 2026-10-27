@@ -1,4 +1,5 @@
 """Datatypes used by the MCP Client API"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -47,12 +48,23 @@ class MCPTool:
     description: str | None
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None
-    definition: dict[str, Any]
+    annotations: dict[str, Any] | None = None
+    task_support: str | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MCPTool:
         """Build a tool snapshot from its public serializable mapping."""
         output_schema = data.get("output_schema")
+        annotations = data.get("annotations")
+        task_support = data.get("task_support")
+        legacy_definition = data.get("definition")
+        if isinstance(legacy_definition, Mapping):
+            if annotations is None:
+                annotations = legacy_definition.get("annotations")
+            if task_support is None:
+                execution = legacy_definition.get("execution")
+                if isinstance(execution, Mapping):
+                    task_support = execution.get("taskSupport")
         return cls(
             name=data["name"],
             title=data.get("title"),
@@ -61,19 +73,26 @@ class MCPTool:
             output_schema=(
                 dict(output_schema) if isinstance(output_schema, Mapping) else None
             ),
-            definition=dict(data["definition"]),
+            annotations=(
+                dict(annotations) if isinstance(annotations, Mapping) else None
+            ),
+            task_support=task_support if isinstance(task_support, str) else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
         """Return the complete public serializable tool snapshot."""
-        return {
+        result: dict[str, Any] = {
             "name": self.name,
             "title": self.title,
             "description": self.description,
             "input_schema": self.input_schema,
             "output_schema": self.output_schema,
-            "definition": self.definition,
         }
+        if self.annotations:
+            result["annotations"] = self.annotations
+        if self.task_support is not None:
+            result["task_support"] = self.task_support
+        return result
 
 
 @dataclass(frozen=True, slots=True)

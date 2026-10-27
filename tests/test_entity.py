@@ -85,7 +85,6 @@ async def test_mcp_context_messages_localize_one_prompt_and_use_saved_catalogue(
         description="Read a stored secret.",
         input_schema={"type": "object"},
         output_schema={"type": "object"},
-        definition={"name": "read_secret"},
     )
     on_demand_disabled_tool = MCPTool(
         name="delete_secret",
@@ -93,7 +92,6 @@ async def test_mcp_context_messages_localize_one_prompt_and_use_saved_catalogue(
         description="Delete a stored secret.",
         input_schema={"type": "object"},
         output_schema=None,
-        definition={"name": "delete_secret"},
     )
     service = MagicMock()
     service.config = MCPServiceConfig(

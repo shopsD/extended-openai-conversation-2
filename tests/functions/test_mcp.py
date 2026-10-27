@@ -29,7 +29,7 @@ def test_mcp_tool_schema_documents_actions_search_and_defaults():
     spec = tool["spec"]
     properties = spec["parameters"]["properties"]
 
-    assert "get_schema to retrieve" in spec["description"]
+    assert "get_tool_details to retrieve" in spec["description"]
     assert "require server_id and tool_name" in properties["action"]["description"]
     assert "cannot expand" in properties["server_ids"]["description"]
     assert "specific operation" in properties["server_id"]["description"]
@@ -83,14 +83,14 @@ def test_mcp_tool_schema_documents_actions_search_and_defaults():
             },
         ),
         (
-            "get_schema",
+            "get_tool_details",
             {
-                "action": "get_schema",
+                "action": "get_tool_details",
                 "server_id": "weather",
                 "tool_name": "forecast",
                 "ignored": True,
             },
-            "get_schema",
+            "get_tool_details",
             {"server_id": "weather", "tool_name": "forecast"},
         ),
         (

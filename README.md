@@ -179,7 +179,7 @@ options and two new options.
  - `Perform initial tool discovery`: The integration will attempt to connect to the MCP server during configuration and can be used to provide a list of tools that are disabled so the agent cannot call (or even see) the tool. It can also be used to provide a list of tools that are always visible to the agent on each prompt without the agent needing to do a lookup/search
  - `Provide default MCP prompt`: This injects the prompt
  ```
- "Use the MCP dispatcher with list_servers to find available servers, list_tools to discover tools, get_schema to retrieve a tool's complete schema, and execute_tool to run it. Use the server_id and tool name provided in this context or returned by discovery. Tools already described in this context do not need to be discovered again.
+ "Use the MCP dispatcher with list_servers to find available servers, list_tools to discover tools, get_tool_details to retrieve all available details for a tool, and execute_tool to run it. Use the server_id and tool name provided in this context or returned by discovery. Tools already described in this context do not need to be discovered again.
  ```
  as a localised instruction at the start of each message sent to the Agent
  - `Enable on-demand discovery`: This allows the agent to perform a search for additional tools that were not permanently assigned.
@@ -196,7 +196,7 @@ options and two new options.
  - If an agent is given a server ID in the prompt but the server has not been assigned to the agent, then the integration will prevent the agent from using any tool on that server
  - If the server ID is changed or deleted and is assigned to an agent, the agent will need to have its config updated to the new ID or have the ID removed
  - A tool cannot be both in the `Permanent tool selection` and the `Disabled tool selection` for a single server
- - The permanent context size in the review section is an estimation of how many additional tokens are consumed by any agent using the current MCP server with its present configuration. The size can be reduced by enabling `On-Demand discovery` and reducing the number of `Permanent tools`. However, this will lead to more tool calls
+ - The permanent context size in the review section is an estimation of how many additional tokens are consumed by any agent using the current MCP server with its present configuration. The size can be reduced by enabling `On-Demand discovery` and reducing the number of `Permanent tools`. You may also turn off `Include permanent tool schemas`. However these actions will lead to more tool calls
  - If the config reports a connection has failed, the MCP server can still be saved, but calls to that MCP server may fail
  - Both Conversation Agents and Task Agents can have access to MCP servers
 
@@ -864,6 +864,15 @@ When using
       {%- endif -%}
 ```
 
+### 8. MCP
+The MCP functions are embedded in and automatically provided to the agent when an MCP server is assigned to it and are not user editable. For reference, the agent is able to see 4 actions through its MCP function:
+- **List servers**: This is a query in which it can lookup what servers that it can access
+- **List tools**: The agent can search for any tools accross any of its MCP servers and is capable of limiting its search
+- **Get Tool Details**: The agent can retrieve a tool's input and output schemas plus any title, description, MCP annotations, and task-support status supplied by the server. Details the server does not provide are omitted
+- **Execute Tool**: The agent uses this to make a call to the MCP server
+
+**NOTE: If the MCP Server has `On-Demand Discovery` disabled in the config, then `List tools` and `List servers` become unavailable to the agent**
+
 ## Practical Usage
 
 See more practical
@@ -882,14 +891,3 @@ logger:
   logs:
     custom_components.extended_openai_conversation: info
 ```
-
-### 8. mcp
-The MCP functions are embedded in and automatically provided to the agent when an mcp server is assigned to it and are not user editable. For reference, the agent is able to see 4 functions:
-- List servers: This is a query in which it can lookup what servers have been assigned to it
-- List tools: The agent can search for any tools accross any of its MCP servers and is capable of limiting its search
-- Get Schema: The agent can retrieve the schema telling it how to call any of the MCP tools and in some cases (MCP Server dependent) how to process the response
-- Execute Tool: The agent uses this to make a call to the MCP server
-
-**NOTE: If the MCP Server has `On-Demand Discovery` disabled in the config, then `List tools` and `List servers` become unavailable to the agent**
-
-
