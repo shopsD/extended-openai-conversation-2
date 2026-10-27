@@ -14,7 +14,6 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPServerInformation,
     MCPServiceConfig,
     MCPTool,
-    MCPUtils,
 )
 
 
@@ -455,11 +454,6 @@ def test_server_config_rejects_invalid_values(kwargs, field, code):
     assert err.value.code == code
 
 
-def test_generate_server_id_uses_first_available_suffix():
-    """Generated IDs remain readable and avoid existing service IDs."""
-    assert MCPUtils.generate_server_id({"mcp_server", "mcp_server_2"}) == "mcp_server_3"
-
-
 def test_permanent_context_estimate_uses_the_rendered_schema_content():
     """Schema inclusion changes the exact context and its estimated token cost."""
     config = MCPServerConfig(
@@ -520,13 +514,13 @@ def test_permanent_context_estimate_uses_the_rendered_schema_content():
 
 def test_config_flow_returns_framework_independent_initial_values():
     """The MCP flow supplies defaults without importing a host UI framework."""
-    result = MCPClientConfigFlow({"mcp_server"}).process()
+    result = MCPClientConfigFlow({"mcp_server", "mcp_server_2"}).process()
 
     assert not result.is_complete
     assert result.errors == {}
     assert result.values == {
         "name": "MCP Server",
-        "server_id": "mcp_server_2",
+        "server_id": "mcp_server_3",
         "description": "",
         "headers": {},
         "use_oauth": False,

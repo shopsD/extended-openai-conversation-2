@@ -58,7 +58,6 @@ from .mcp_errors import (
 )
 from .mcp_service import MCPService
 from .mcp_tool_manager import MCPToolManager
-from .mcp_utils import MCPUtils
 from .oauth import (
     MCPOAuthClientRegistrar,
     MCPOAuthClientRegistration,
@@ -122,5 +121,4 @@ __all__ = [
     "MCPTool",
     "MCPToolManager",
     "MCPToolResult",
-    "MCPUtils",
 ]

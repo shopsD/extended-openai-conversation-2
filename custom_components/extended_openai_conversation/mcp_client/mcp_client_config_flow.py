@@ -10,7 +10,6 @@ from .config import MCPServerConfig
 from .mcp_client import MCPClient
 from .mcp_datatypes import MCPDiscoveryResult, MCPServerInformation
 from .mcp_errors import MCPConfigError
-from .mcp_utils import MCPUtils
 
 DEFAULT_MCP_SERVER_NAME = "MCP Server"
 
@@ -42,15 +41,22 @@ class MCPClientConfigFlow:
         """Initialize processing with the server IDs reserved by the host."""
         self._existing_server_ids = frozenset(existing_server_ids)
 
-    def process(
-        self, user_input: Mapping[str, Any] | None = None
-    ) -> MCPClientConfigFlowResult:
+    def _generate_server_id(self, base_id: str = "mcp_server") -> str:
+        """Generate a readable server ID that does not collide with existing IDs."""
+        candidate = base_id
+        suffix = 2
+        while candidate in self._existing_server_ids:
+            candidate = f"{base_id}_{suffix}"
+            suffix += 1
+        return candidate
+
+    def process(self, user_input: Mapping[str, Any] | None = None) -> MCPClientConfigFlowResult:
         """Return initial form values or process submitted connection data."""
         if user_input is None:
             return MCPClientConfigFlowResult(
                 values={
                     "name": DEFAULT_MCP_SERVER_NAME,
-                    "server_id": MCPUtils.generate_server_id(self._existing_server_ids),
+                    "server_id": self._generate_server_id(),
                     "description": "",
                     "headers": {},
                     "use_oauth": False,
@@ -86,16 +92,12 @@ class MCPClientConfigFlow:
             config=config,
         )
 
-    async def discover(
-        self, config: MCPServerConfig, *, auth: Any | None = None
-    ) -> MCPDiscoveryResult:
+    async def discover(self, config: MCPServerConfig, *, auth: Any | None = None) -> MCPDiscoveryResult:
         """Retrieve the server and tools catalogue."""
         async with MCPClient(config, auth=auth) as client:
             return await client.discover()
 
-    async def check_connection(
-        self, config: MCPServerConfig, *, auth: Any | None = None
-    ) -> MCPServerInformation:
+    async def check_connection(self, config: MCPServerConfig, *, auth: Any | None = None) -> MCPServerInformation:
         """Initialize the server without retrieving its tool catalogue."""
         async with MCPClient(config, auth=auth) as client:
             return await client.check_connection()
