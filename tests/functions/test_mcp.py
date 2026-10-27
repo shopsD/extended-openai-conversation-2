@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from custom_components.extended_openai_conversation.functions import MCPFunction
@@ -170,3 +171,50 @@ async def test_execute_rejects_invalid_action(
         }
     }
     manager.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "message"),
+    [
+        (
+            401,
+            "authentication_failed",
+            "The MCP server rejected the supplied credentials",
+        ),
+        (403, "access_denied", "The MCP server denied access"),
+    ],
+)
+async def test_execute_returns_nested_http_authentication_failures(
+    hass, llm_context, exposed_entities, status, code, message
+):
+    """Transport authentication failures remain ordinary tool results."""
+    request = httpx.Request("POST", "https://mcp.example.com/api")
+    response = httpx.Response(status, request=request)
+    transport_error = httpx.HTTPStatusError(
+        "request failed", request=request, response=response
+    )
+    operation = AsyncMock(
+        side_effect=ExceptionGroup("MCP transport failed", [transport_error])
+    )
+    scope = MagicMock()
+    scope.list_loaded.return_value = [MagicMock()]
+    manager = MagicMock()
+    manager.scope.return_value = scope
+
+    with (
+        patch(
+            "custom_components.extended_openai_conversation.functions.mcp."
+            "MCPServiceManager",
+            return_value=manager,
+        ),
+        patch.object(MCPToolManager, "list_tools", operation),
+    ):
+        result = await MCPFunction().execute(
+            hass,
+            {"type": "mcp", "server_ids": ["weather"]},
+            {"action": "list_tools"},
+            llm_context,
+            exposed_entities,
+        )
+
+    assert result == {"error": {"code": code, "message": message}}

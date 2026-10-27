@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+import httpx
 import probatio as vol
 
 from homeassistant.core import HomeAssistant
@@ -12,6 +14,8 @@ from homeassistant.helpers import llm
 from ..mcp_client import MCPToolManager
 from ..mcp_service_manager import MCPServiceManager
 from .base import Function
+
+_LOGGER = logging.getLogger(__name__)
 
 _LIST_SERVERS_ARGUMENTS = (
     "query",
@@ -37,6 +41,53 @@ _LIST_TOOLS_ARGUMENTS = (
     "current_page",
     "entries_per_page",
 )
+
+
+def _mcp_runtime_error(error: BaseException) -> dict[str, Any]:
+    """Convert nested MCP transport failures into a model-facing result."""
+    pending = [error]
+    seen: set[int] = set()
+    exceptions: list[BaseException] = []
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        exceptions.append(current)
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+
+    statuses = {
+        current.response.status_code
+        for current in exceptions
+        if isinstance(current, httpx.HTTPStatusError)
+    }
+    if 401 in statuses:
+        code = "authentication_failed"
+        message = "The MCP server rejected the supplied credentials"
+    elif 403 in statuses:
+        code = "access_denied"
+        message = "The MCP server denied access"
+    elif 404 in statuses:
+        code = "server_not_found"
+        message = "The MCP server endpoint was not found"
+    elif any(500 <= status <= 599 for status in statuses):
+        code = "server_error"
+        message = "The MCP server failed to process the request"
+    elif any(
+        isinstance(current, (httpx.NetworkError, httpx.TimeoutException))
+        for current in exceptions
+    ):
+        code = "cannot_connect"
+        message = "Unable to connect to the MCP server"
+    else:
+        code = "mcp_request_failed"
+        message = "The MCP request failed"
+    return {"error": {"code": code, "message": message}}
 
 
 def build_mcp_function_tool(server_ids: list[str]) -> dict[str, Any]:
@@ -246,40 +297,44 @@ class MCPFunction(Function):
                 }
             }
 
-        services = MCPServiceManager(hass).scope(
-            function_config["server_ids"]
-        ).list_loaded()
+        try:
+            services = MCPServiceManager(hass).scope(
+                function_config["server_ids"]
+            ).list_loaded()
 
-        if action == "list_servers":
-            return await MCPToolManager.list_servers(
-                services,
-                **{
-                    key: arguments[key]
-                    for key in _LIST_SERVERS_ARGUMENTS
-                    if key in arguments
-                },
-            )
+            if action == "list_servers":
+                return await MCPToolManager.list_servers(
+                    services,
+                    **{
+                        key: arguments[key]
+                        for key in _LIST_SERVERS_ARGUMENTS
+                        if key in arguments
+                    },
+                )
 
-        if action == "list_tools":
-            return await MCPToolManager.list_tools(
-                services,
-                **{
-                    key: arguments[key]
-                    for key in _LIST_TOOLS_ARGUMENTS
-                    if key in arguments
-                },
-            )
+            if action == "list_tools":
+                return await MCPToolManager.list_tools(
+                    services,
+                    **{
+                        key: arguments[key]
+                        for key in _LIST_TOOLS_ARGUMENTS
+                        if key in arguments
+                    },
+                )
 
-        if action == "get_tool_details":
-            return await MCPToolManager.get_tool_details(
+            if action == "get_tool_details":
+                return await MCPToolManager.get_tool_details(
+                    services,
+                    server_id=arguments.get("server_id", ""),
+                    tool_name=arguments.get("tool_name", ""),
+                )
+
+            return await MCPToolManager.execute_tool(
                 services,
                 server_id=arguments.get("server_id", ""),
                 tool_name=arguments.get("tool_name", ""),
+                arguments=arguments.get("arguments"),
             )
-
-        return await MCPToolManager.execute_tool(
-            services,
-            server_id=arguments.get("server_id", ""),
-            tool_name=arguments.get("tool_name", ""),
-            arguments=arguments.get("arguments"),
-        )
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.exception("MCP %s action failed", action)
+            return _mcp_runtime_error(err)
