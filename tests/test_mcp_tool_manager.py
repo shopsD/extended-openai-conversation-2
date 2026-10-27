@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from custom_components.extended_openai_conversation.mcp_client import (
     MCPClient,
     MCPServerConfig,
+    MCPServerInformation,
     MCPService,
     MCPServiceConfig,
     MCPTool,
@@ -45,6 +46,7 @@ def _service(
     disabled_tools: tuple[str, ...] = (),
     tool_name_pattern: str = "",
     tools: tuple[MCPTool, ...] = (),
+    server_information: MCPServerInformation | None = None,
 ) -> MCPService:
     config = MCPServiceConfig(
         server=MCPServerConfig(
@@ -57,6 +59,7 @@ def _service(
         on_demand_discovery=on_demand_discovery,
         disabled_tools=disabled_tools,
         tool_name_pattern=tool_name_pattern,
+        server_information=server_information,
     )
     client = MagicMock(spec=MCPClient)
     client.list_tools = AsyncMock(return_value=tools)
@@ -92,6 +95,89 @@ async def test_list_servers_without_tool_fields_avoids_server_calls():
     }
     storage.client.list_tools.assert_not_awaited()
     calendar.client.list_tools.assert_not_awaited()
+
+
+async def test_list_servers_returns_cached_server_information_without_calling_server():
+    """Cached initialization data is returned without a live connection."""
+    cached = MCPServerInformation(
+        name="Storage MCP",
+        version="1.0.0",
+        protocol_version="2025-06-18",
+        instructions="Use storage tools carefully.",
+        capabilities={"tools": {"listChanged": True}},
+    )
+    storage = _service("storage", server_information=cached)
+
+    result = await MCPToolManager.list_servers(
+        [storage], server_info="cached"
+    )
+
+    assert result["servers"][0]["server_info"] == cached.to_dict()
+    assert result["servers"][0]["server_info_source"] == "cached"
+    storage.client.check_connection.assert_not_awaited()
+
+
+async def test_list_servers_latest_compares_only_servers_on_returned_page():
+    """Live initialization checks occur after server-result pagination."""
+    cached = MCPServerInformation(
+        name="Storage MCP",
+        version="1.0.0",
+        protocol_version="2025-06-18",
+        instructions=None,
+        capabilities={"tools": {}},
+    )
+    latest = MCPServerInformation(
+        name="Storage MCP",
+        version="2.0.0",
+        protocol_version="2025-06-18",
+        instructions=None,
+        capabilities={"tools": {}},
+    )
+    storage = _service("storage", server_information=cached)
+    calendar = _service("calendar")
+    storage.client.check_connection = AsyncMock(return_value=latest)
+
+    result = await MCPToolManager.list_servers(
+        [storage, calendar],
+        server_info="latest",
+        entries_per_page=1,
+    )
+
+    server = result["servers"][0]
+    assert server["server_info"] == latest.to_dict()
+    assert server["server_info_source"] == "latest"
+    assert server["server_info_changed"] is True
+    assert server["changed_fields"] == ["version"]
+    storage.client.check_connection.assert_awaited_once_with()
+    calendar.client.check_connection.assert_not_awaited()
+
+
+async def test_list_servers_latest_retains_server_when_information_check_fails():
+    """A live metadata failure is local to that server result."""
+    storage = _service("storage")
+    storage.client.check_connection = AsyncMock(side_effect=RuntimeError("offline"))
+
+    result = await MCPToolManager.list_servers(
+        [storage], server_info="latest"
+    )
+
+    assert result["servers"][0]["id"] == "storage"
+    assert result["servers"][0]["server_info_error"] == {
+        "code": "server_info_unavailable",
+        "message": "Latest server information could not be retrieved",
+    }
+
+
+async def test_list_servers_rejects_invalid_server_information_mode():
+    """Invalid server information modes fail without contacting servers."""
+    storage = _service("storage")
+
+    result = await MCPToolManager.list_servers(
+        [storage], server_info="refresh"
+    )
+
+    assert result["error"]["code"] == "invalid_server_info"
+    storage.client.check_connection.assert_not_awaited()
 
 
 async def test_list_servers_searches_only_discoverable_non_permanent_tools():

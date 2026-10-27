@@ -152,6 +152,7 @@ def test_service_config_selection_keeps_only_selected_tool_snapshots():
         disabled_tool_names=[],
         tool_name_pattern="",
         regex_timeout=0.1,
+        server_information=discovery.server,
     )
 
     assert config.permanent_tools == (tools[1],)

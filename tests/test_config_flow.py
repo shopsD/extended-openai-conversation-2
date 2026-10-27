@@ -190,7 +190,15 @@ async def test_mcp_step_keeps_config_and_returns_to_service_menu(hass):
     with patch(
         "custom_components.extended_openai_conversation.config_flow."
         "MCPClientConfigFlow.check_connection",
-        new=AsyncMock(),
+        new=AsyncMock(
+            return_value=MCPServerInformation(
+                name="Vault Server",
+                version="1.0.0",
+                protocol_version="2025-06-18",
+                instructions=None,
+                capabilities={},
+            )
+        ),
     ) as check_connection:
         result = await flow.async_step_mcp(user_input)
 
@@ -932,6 +940,7 @@ async def test_requested_initial_discovery_caches_catalogue(hass):
 
     mock_discover.assert_awaited_once_with(config, auth=None)
     assert flow._mcp_discovery is discovery
+    assert flow._mcp_server_information is discovery.server
     assert flow._mcp_connection_status is True
     assert flow._mcp_discovery_status is True
 
@@ -1089,7 +1098,7 @@ async def test_filter_submission_can_be_reviewed_and_saved(hass):
     with patch(
         "custom_components.extended_openai_conversation.config_flow."
         "MCPClientConfigFlow.check_connection",
-        new=AsyncMock(),
+        new=AsyncMock(return_value=flow._mcp_discovery.server),
     ), patch(
         "custom_components.extended_openai_conversation.config_flow."
         "async_get_mcp_default_prompt",
@@ -1295,6 +1304,13 @@ async def test_disabled_initial_discovery_only_checks_connection(hass):
         url="https://mcp.example.com/api",
     )
     flow._mcp_options = {CONF_MCP_PERFORM_TOOL_DISCOVERY: False}
+    server_information = MCPServerInformation(
+        name="Vault Server",
+        version="1.0.0",
+        protocol_version="2025-06-18",
+        instructions=None,
+        capabilities={},
+    )
 
     with (
         patch(
@@ -1305,7 +1321,7 @@ async def test_disabled_initial_discovery_only_checks_connection(hass):
         patch(
             "custom_components.extended_openai_conversation.config_flow."
             "MCPClientConfigFlow.check_connection",
-            new=AsyncMock(),
+            new=AsyncMock(return_value=server_information),
         ) as check_connection,
     ):
         await flow._async_test_mcp_server(run_requested_discovery=True)
@@ -1313,6 +1329,10 @@ async def test_disabled_initial_discovery_only_checks_connection(hass):
     mock_discover.assert_not_awaited()
     check_connection.assert_awaited_once_with(flow._mcp_config, auth=None)
     assert flow._mcp_discovery is None
+    assert flow._mcp_server_information is server_information
+    assert not flow._set_mcp_service_config(flow._mcp_policy_values())
+    assert flow._mcp_service_config is not None
+    assert flow._mcp_service_config.server_information is server_information
 
 
 async def test_mcp_step_rejects_duplicate_server_id(hass):

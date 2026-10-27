@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
+from dataclasses import replace
 import logging
 import types
 from typing import Any, override
@@ -171,6 +172,7 @@ from .mcp_client import (
     MCPOAuthConfiguration,
     MCPProtocolError,
     MCPServerConfig,
+    MCPServerInformation,
     MCPServiceConfig,
 )
 from .mcp_oauth import (
@@ -355,6 +357,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         super().__init__()
         self._mcp_config: MCPServerConfig | None = None
         self._mcp_discovery: MCPDiscoveryResult | None = None
+        self._mcp_server_information: MCPServerInformation | None = None
         self._mcp_options: dict[str, Any] | None = None
         self._mcp_service_config: MCPServiceConfig | None = None
         self._mcp_oauth_data: dict[str, Any] | None = None
@@ -552,6 +555,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             previous_config = self._mcp_config
             if result.config != self._mcp_config:
                 self._mcp_discovery = None
+                self._mcp_server_information = None
                 self._mcp_options = None
                 self._mcp_service_config = None
                 self._mcp_error_reason = None
@@ -1131,11 +1135,14 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 self._mcp_discovery = await processor.discover(
                     self._mcp_config, auth=auth
                 )
+                self._retain_mcp_server_information(self._mcp_discovery.server)
                 self._mcp_connection_status = True
                 self._mcp_discovery_status = True
                 self._mcp_error_reason = None
             else:
-                await processor.check_connection(self._mcp_config, auth=auth)
+                self._retain_mcp_server_information(
+                    await processor.check_connection(self._mcp_config, auth=auth)
+                )
                 self._mcp_connection_status = True
                 self._mcp_error_reason = None
                 if not discover:
@@ -1152,6 +1159,17 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 self._mcp_discovery_status = False
         finally:
             self._sync_mcp_oauth_token_from_entry()
+
+    def _retain_mcp_server_information(
+        self, server_information: MCPServerInformation
+    ) -> None:
+        """Retain initialization data from the latest successful connection."""
+        self._mcp_server_information = server_information
+        if self._mcp_service_config is not None:
+            self._mcp_service_config = replace(
+                self._mcp_service_config,
+                server_information=server_information,
+            )
 
     def _mcp_policy_values(self) -> dict[str, Any]:
         """Return complete policy values using the current draft and defaults."""
@@ -1188,6 +1206,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 disabled_tool_names=options[CONF_MCP_DISABLED_TOOLS],
                 tool_name_pattern=options[CONF_MCP_TOOL_NAME_PATTERN],
                 regex_timeout=options[CONF_MCP_REGEX_TIMEOUT],
+                server_information=self._mcp_server_information,
             )
         except MCPConfigError as err:
             self._mcp_options = options
@@ -1314,6 +1333,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         service_config = MCPServiceConfig.from_dict(entry.data)
         self._selected_service_type = SERVICE_TYPE_MCP
         self._mcp_config = service_config.server
+        self._mcp_server_information = service_config.server_information
         self._mcp_oauth_data = dict(entry.data)
         self._mcp_oauth_timeout = float(
             entry.data.get(CONF_MCP_OAUTH_TIMEOUT, DEFAULT_MCP_OAUTH_TIMEOUT)
@@ -1347,6 +1367,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             service_config = MCPServiceConfig.from_dict(entry.data)
             self._mcp_config = service_config.server
             self._mcp_discovery = None
+            self._mcp_server_information = service_config.server_information
             self._mcp_options = service_config.to_policy_dict()
             self._mcp_service_config = service_config
             if service_config.server.use_oauth:

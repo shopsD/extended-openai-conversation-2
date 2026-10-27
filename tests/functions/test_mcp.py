@@ -50,6 +50,8 @@ def test_mcp_tool_schema_documents_actions_search_and_defaults():
     assert "Defaults to 1" in properties["current_page"]["description"]
     assert "Defaults to 20" in properties["entries_per_page"]["description"]
     assert "hard maximum of 100" in properties["entries_per_page"]["description"]
+    assert properties["server_info"]["enum"] == ["cached", "latest"]
+    assert "returned page" in properties["server_info"]["description"]
 
 
 @pytest.mark.parametrize(
@@ -61,10 +63,15 @@ def test_mcp_tool_schema_documents_actions_search_and_defaults():
                 "action": "list_servers",
                 "query": "weather",
                 "include_tools": True,
+                "server_info": "cached",
                 "ignored": True,
             },
             "list_servers",
-            {"query": "weather", "include_tools": True},
+            {
+                "query": "weather",
+                "include_tools": True,
+                "server_info": "cached",
+            },
         ),
         (
             "list_tools",

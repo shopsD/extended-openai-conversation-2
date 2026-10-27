@@ -96,6 +96,7 @@ class MCPServiceConfig:
         disabled_tool_names: Collection[str],
         tool_name_pattern: str,
         regex_timeout: float,
+        server_information: MCPServerInformation | None = None,
     ) -> MCPServiceConfig:
         """Validate, apply hard filters, and normalize a policy selection."""
         permanent_names: set[str] = cls._validate_names(selected_tool_names, "permanent_tools")
@@ -125,7 +126,7 @@ class MCPServiceConfig:
             disabled_tools=tuple(sorted(disabled_names)),
             tool_name_pattern=tool_name_pattern,
             regex_timeout=regex_timeout,
-            server_information=discovery.server if discovery is not None else None,
+            server_information=server_information,
         )
         permanent_tools: tuple[MCPTool, ...] = tuple(
             tool

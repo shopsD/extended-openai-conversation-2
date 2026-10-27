@@ -22,6 +22,7 @@ _LIST_SERVERS_ARGUMENTS = (
     "all_tools",
     "include_description",
     "include_schema",
+    "server_info",
     "current_page",
     "entries_per_page",
 )
@@ -178,6 +179,18 @@ def build_mcp_function_tool(server_ids: list[str]) -> dict[str, Any]:
                             "in results. For list_servers, this applies only to tool "
                             "summaries included in the bounded preview. For list_tools, "
                             "this applies to each returned tool. Defaults to false."
+                        ),
+                    },
+                    "server_info": {
+                        "type": "string",
+                        "enum": ["cached", "latest"],
+                        "description": (
+                            "For list_servers only, include MCP initialization "
+                            "information. cached uses the last successful setup or "
+                            "reconfiguration check without contacting the server. "
+                            "latest contacts each server on the returned page and "
+                            "compares its current information with the cached value. "
+                            "Omit this parameter to exclude server information."
                         ),
                     },
                     "current_page": {

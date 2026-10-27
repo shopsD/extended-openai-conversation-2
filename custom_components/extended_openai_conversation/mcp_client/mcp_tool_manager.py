@@ -13,6 +13,7 @@ from .service_config import MCPServiceConfig
 
 _DEFAULT_ENTRIES_PER_PAGE = 20
 _MAX_ENTRIES_PER_PAGE = 100
+_SERVER_INFO_MODES = frozenset({"cached", "latest"})
 _SERVER_SEARCH_FIELDS = frozenset(
     {"server_id", "server_name", "tool_name", "description", "schema"}
 )
@@ -49,6 +50,7 @@ class MCPToolManager:
         all_tools: bool = False,
         include_description: bool = True,
         include_schema: bool = False,
+        server_info: str | None = None,
         current_page: int = 1,
         entries_per_page: int = _DEFAULT_ENTRIES_PER_PAGE,
     ) -> dict[str, Any]:
@@ -63,6 +65,13 @@ class MCPToolManager:
         )
         if validation_error is not None:
             return validation_error
+        if server_info is not None and (
+            not isinstance(server_info, str) or server_info not in _SERVER_INFO_MODES
+        ):
+            return MCPToolManager._error(
+                "invalid_server_info",
+                "server_info must be cached or latest",
+            )
 
         include_tools = include_tools or all_tools
 
@@ -109,12 +118,20 @@ class MCPToolManager:
         except TimeoutError:
             return MCPToolManager._error("regex_timeout", "The MCP catalogue search timed out")
 
-        return MCPToolManager._paginate(
+        page = MCPToolManager._paginate(
             matches,
             result_key="servers",
             current_page=current_page,
             entries_per_page=entries_per_page,
         )
+        if server_info is not None:
+            services_by_id = {
+                service.config.server.server_id: service for service in services
+            }
+            await MCPToolManager._add_server_information(
+                page["servers"], services_by_id, server_info
+            )
+        return page
 
     @staticmethod
     async def list_tools(
@@ -350,6 +367,48 @@ class MCPToolManager:
                 "criteria. Try searching without tool fields or list all tools."
             )
         return result
+
+    @staticmethod
+    async def _add_server_information(
+        results: list[dict[str, Any]],
+        services_by_id: Mapping[str, MCPService],
+        mode: str,
+    ) -> None:
+        """Add cached or live initialization details to one result page."""
+        for result in results:
+            service = services_by_id[result["id"]]
+            cached = service.config.server_information
+            if mode == "cached":
+                if cached is not None:
+                    result["server_info"] = cached.to_dict()
+                    result["server_info_source"] = "cached"
+                continue
+
+            try:
+                latest = await service.client.check_connection()
+            except Exception:  # A metadata failure must not hide the server.
+                result["server_info_error"] = {
+                    "code": "server_info_unavailable",
+                    "message": "Latest server information could not be retrieved",
+                }
+                continue
+
+            latest_data = latest.to_dict()
+            result["server_info"] = latest_data
+            result["server_info_source"] = "latest"
+            if cached is None:
+                result["server_info_comparison"] = "no_cached_information"
+                continue
+
+            cached_data = cached.to_dict()
+            changed_fields = [
+                field
+                for field in latest_data.keys() | cached_data.keys()
+                if latest_data.get(field) != cached_data.get(field)
+            ]
+            result["server_info_changed"] = bool(changed_fields)
+            if changed_fields:
+                result["changed_fields"] = sorted(changed_fields)
 
     @staticmethod
     def _paginate(

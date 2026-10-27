@@ -866,7 +866,7 @@ When using
 
 ### 8. MCP
 The MCP functions are embedded in and automatically provided to the agent when an MCP server is assigned to it and are not user editable. For reference, the agent is able to see 4 actions through its MCP function:
-- **List servers**: This is a query in which it can lookup what servers that it can access
+- **List servers**: This is a query in which it can lookup what servers it can access. It can optionally return cached initialization information or query the server for the latest information and report which fields changed
 - **List tools**: The agent can search for any tools accross any of its MCP servers and is capable of limiting its search
 - **Get Tool Details**: The agent can retrieve a tool's input and output schemas plus any title, description, MCP annotations, and task-support status supplied by the server. Details the server does not provide are omitted
 - **Execute Tool**: The agent uses this to make a call to the MCP server
