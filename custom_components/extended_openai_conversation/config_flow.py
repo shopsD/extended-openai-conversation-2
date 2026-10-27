@@ -417,7 +417,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             options.append("ai_endpoint")
 
         service_configuration = self._service_configuration()
-        
+
         if is_mcp and service_configuration is not None:
             options.append("service_review")
         if service_configuration is not None:

@@ -62,7 +62,7 @@ class MCPOAuthImplementation(
             context.authorization_server.token_url,
             credential.client_secret,
         )
-        self._name = credential.name
+        self._name: str | None = credential.name
         self._resource = context.resource
 
     @property
