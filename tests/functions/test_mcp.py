@@ -11,18 +11,6 @@ from custom_components.extended_openai_conversation.functions.mcp import (
 from custom_components.extended_openai_conversation.mcp_client import MCPToolManager
 
 
-def test_all_tools_description_explains_implicit_bounded_preview():
-    """The model is told how all_tools affects inclusion and pagination."""
-    tool = build_mcp_function_tool(["weather"])
-
-    description = tool["spec"]["parameters"]["properties"]["all_tools"][
-        "description"
-    ]
-    assert "Implies include_tools=true" in description
-    assert "per-server result limit" in description
-    assert "paginate further" in description
-
-
 def test_mcp_tool_schema_documents_actions_search_and_defaults():
     """The shared dispatcher explains action-specific inputs to the model."""
     tool = build_mcp_function_tool(["weather"])
@@ -50,6 +38,9 @@ def test_mcp_tool_schema_documents_actions_search_and_defaults():
     assert "Defaults to 1" in properties["current_page"]["description"]
     assert "Defaults to 20" in properties["entries_per_page"]["description"]
     assert "hard maximum of 100" in properties["entries_per_page"]["description"]
+    assert "Implies include_tools=true" in properties["all_tools"]["description"]
+    assert "per-server result limit" in properties["all_tools"]["description"]
+    assert "paginate further" in properties["all_tools"]["description"]
     assert properties["server_info"]["enum"] == ["cached", "latest"]
     assert "returned page" in properties["server_info"]["description"]
 

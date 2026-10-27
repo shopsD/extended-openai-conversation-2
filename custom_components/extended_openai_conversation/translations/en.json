@@ -29,8 +29,7 @@
             "invalid_tool_name_pattern": "Enter a valid regular expression.",
             "mcp_discovery_required": "Discover the MCP server before selecting permanent tools.",
             "invalid_url": "Enter a valid HTTP or HTTPS URL.",
-            "unknown": "Unexpected error",
-            "mcp_tool_discovery_failed": "Unable to retrieve tools from the MCP server."
+            "unknown": "Unexpected error"
         },
         "abort": {
             "entry_not_loaded": "The configuration entry must be loaded before it can be changed.",
@@ -121,14 +120,6 @@
                     "oauth_timeout": "Seconds to wait for the browser authorization callback. Set to 0 to disable the timeout."
                 },
                 "submit": "Continue"
-            },
-            "credentials_choice": {
-                "title": "Choose OAuth credentials",
-                "description": "Use existing Home Assistant Application Credentials for this authorization server, or add new credentials.",
-                "menu_options": {
-                    "pick_implementation": "Use existing credentials",
-                    "new_credentials": "Add new credentials"
-                }
             },
             "mcp_credentials": {
                 "title": "MCP OAuth application credentials",

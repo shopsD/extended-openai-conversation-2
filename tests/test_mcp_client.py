@@ -1,5 +1,6 @@
 """Tests for the extractable MCP client public API."""
 
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -15,6 +16,44 @@ from custom_components.extended_openai_conversation.mcp_client import (
     MCPServiceConfig,
     MCPTool,
 )
+
+
+def _server(server_id: str = "vault", **overrides: Any) -> MCPServerConfig:
+    """Return a valid MCP server configuration."""
+    values = {
+        "server_id": server_id,
+        "name": "Vault MCP" if server_id == "vault" else "Tool Server",
+        "url": "https://mcp.example.com/api",
+        **overrides,
+    }
+    return MCPServerConfig(**values)
+
+
+def _tool(name: str, **overrides: Any) -> MCPTool:
+    """Return a minimal MCP tool definition."""
+    values = {
+        "name": name,
+        "title": None,
+        "description": None,
+        "input_schema": {"type": "object"},
+        "output_schema": None,
+        **overrides,
+    }
+    return MCPTool(**values)
+
+
+def _discovery(*tools: MCPTool) -> MCPDiscoveryResult:
+    """Return common server information with the supplied catalogue."""
+    return MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=tools,
+    )
 
 
 def test_server_config_normalises_and_serialises_values():
@@ -112,31 +151,9 @@ def test_service_config_round_trips_complete_permanent_catalogue():
 
 def test_service_config_selection_keeps_only_selected_tool_snapshots():
     """Selection validation stores complete definitions for selected tools."""
-    server = MCPServerConfig(
-        server_id="vault",
-        name="Vault MCP",
-        url="https://mcp.example.com/api",
-    )
-    tools = tuple(
-        MCPTool(
-            name=name,
-            title=None,
-            description=None,
-            input_schema={"type": "object"},
-            output_schema=None,
-        )
-        for name in ("read_secret", "write_secret")
-    )
-    discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=tools,
-    )
+    server = _server()
+    tools = tuple(_tool(name) for name in ("read_secret", "write_secret"))
+    discovery = _discovery(*tools)
 
     config = MCPServiceConfig.from_selection(
         server,
@@ -160,31 +177,11 @@ def test_service_config_selection_keeps_only_selected_tool_snapshots():
 
 def test_service_config_applies_filters_only_to_on_demand_tools():
     """Permanent tools bypass filters that constrain on-demand discovery."""
-    server = MCPServerConfig(
-        server_id="vault",
-        name="Vault MCP",
-        url="https://mcp.example.com/api",
-    )
+    server = _server()
     tools = tuple(
-        MCPTool(
-            name=name,
-            title=None,
-            description=None,
-            input_schema={"type": "object"},
-            output_schema=None,
-        )
-        for name in ("read_secret", "read_public", "write_secret")
+        _tool(name) for name in ("read_secret", "read_public", "write_secret")
     )
-    discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=tools,
-    )
+    discovery = _discovery(*tools)
 
     config = MCPServiceConfig.from_selection(
         server,
@@ -216,11 +213,7 @@ def test_empty_disabled_selection_does_not_affect_regex_filter(
 ):
     """An empty exact selection is inactive regardless of its mode."""
     config = MCPServiceConfig(
-        server=MCPServerConfig(
-            server_id="tools",
-            name="Tool Server",
-            url="https://mcp.example.com/api",
-        ),
+        server=_server("tools"),
         disabled_tool_mode=disabled_mode,
         disabled_tools=(),
         tool_name_pattern=r".*delete.*",
@@ -233,11 +226,7 @@ def test_empty_disabled_selection_does_not_affect_regex_filter(
 def test_explicit_disabled_tool_short_circuits_regex_filter():
     """A tool disabled by exact selection is rejected without regex evaluation."""
     config = MCPServiceConfig(
-        server=MCPServerConfig(
-            server_id="tools",
-            name="Tool Server",
-            url="https://mcp.example.com/api",
-        ),
+        server=_server("tools"),
         disabled_tool_mode="selected",
         disabled_tools=("read_record",),
         tool_name_pattern=r".*delete.*",
@@ -255,11 +244,7 @@ def test_explicit_disabled_tool_short_circuits_regex_filter():
 def test_disabled_selection_and_regex_are_independent_deny_filters():
     """Either an exact disabled selection or a regex match rejects a tool."""
     config = MCPServiceConfig(
-        server=MCPServerConfig(
-            server_id="tools",
-            name="Tool Server",
-            url="https://mcp.example.com/api",
-        ),
+        server=_server("tools"),
         disabled_tool_mode="selected",
         disabled_tools=("read_record",),
         tool_name_pattern=r".*delete.*",
@@ -272,28 +257,9 @@ def test_disabled_selection_and_regex_are_independent_deny_filters():
 
 def test_service_config_rejects_permanent_disabled_tool_conflict():
     """Resolved permanent and disabled selections must not overlap."""
-    server = MCPServerConfig(
-        server_id="vault",
-        name="Vault MCP",
-        url="https://mcp.example.com/api",
-    )
-    tool = MCPTool(
-        name="write_secret",
-        title=None,
-        description=None,
-        input_schema={"type": "object"},
-        output_schema=None,
-    )
-    discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(tool,),
-    )
+    server = _server()
+    tool = _tool("write_secret")
+    discovery = _discovery(tool)
 
     with pytest.raises(MCPConfigError) as err:
         MCPServiceConfig.from_selection(
@@ -317,28 +283,9 @@ def test_service_config_rejects_permanent_disabled_tool_conflict():
 
 def test_empty_disabled_selection_does_not_conflict_with_permanent_tools():
     """An empty inverted selection resolves to no disabled tools."""
-    server = MCPServerConfig(
-        server_id="vault",
-        name="Vault MCP",
-        url="https://mcp.example.com/api",
-    )
-    tool = MCPTool(
-        name="write_secret",
-        title=None,
-        description=None,
-        input_schema={"type": "object"},
-        output_schema=None,
-    )
-    discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(tool,),
-    )
+    server = _server()
+    tool = _tool("write_secret")
+    discovery = _discovery(tool)
 
     config = MCPServiceConfig.from_selection(
         server,
@@ -360,21 +307,8 @@ def test_empty_disabled_selection_does_not_conflict_with_permanent_tools():
 
 def test_service_config_selection_rejects_unknown_tool():
     """A submitted tool name must exist in the discovered catalogue."""
-    server = MCPServerConfig(
-        server_id="vault",
-        name="Vault MCP",
-        url="https://mcp.example.com/api",
-    )
-    discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(),
-    )
+    server = _server()
+    discovery = _discovery()
 
     with pytest.raises(MCPConfigError) as err:
         MCPServiceConfig.from_selection(
@@ -399,11 +333,7 @@ def test_service_config_selection_rejects_unknown_tool():
 def test_service_config_without_catalogue_has_no_permanent_tools():
     """Skipped discovery supports on-demand regex policy without selectors."""
     config = MCPServiceConfig.from_selection(
-        MCPServerConfig(
-            server_id="vault",
-            name="Vault MCP",
-            url="https://mcp.example.com/api",
-        ),
+        _server(),
         None,
         perform_tool_discovery=False,
         provide_default_prompt=True,
@@ -456,12 +386,7 @@ def test_server_config_rejects_invalid_values(kwargs, field, code):
 
 def test_permanent_context_estimate_uses_the_rendered_schema_content():
     """Schema inclusion changes the exact context and its estimated token cost."""
-    config = MCPServerConfig(
-        server_id="vault",
-        name="Vault MCP",
-        url="https://mcp.example.com/api",
-        description="Storage tools",
-    )
+    config = _server(description="Storage tools")
     tools = (
         MCPTool(
             name="read_secret",

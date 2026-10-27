@@ -10,6 +10,7 @@ follow-up (see issue #7) rather than attempted here with a mocked hass that
 doesn't behave like the real flow manager.
 """
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -96,6 +97,51 @@ def _config_flow(hass) -> ExtendedOpenAIConversationConfigFlow:
     hass.config_entries.async_entries.return_value = []
     flow._async_service_menu_status_lines = AsyncMock(return_value="status")
     return flow
+
+
+def _mcp_server_config(**overrides: Any) -> MCPServerConfig:
+    """Return the common MCP server configuration used by flow tests."""
+    values = {
+        "name": "Vault MCP",
+        "server_id": "vault",
+        "url": "https://mcp.example.com/api",
+        **overrides,
+    }
+    return MCPServerConfig(**values)
+
+
+def _mcp_server_information(**overrides: Any) -> MCPServerInformation:
+    """Return common initialized MCP server information."""
+    values = {
+        "name": "Vault Server",
+        "version": "1.0.0",
+        "protocol_version": "2025-06-18",
+        "instructions": None,
+        "capabilities": {},
+        **overrides,
+    }
+    return MCPServerInformation(**values)
+
+
+def _mcp_tool(name: str = "read_secret", **overrides: Any) -> MCPTool:
+    """Return a common discovered MCP tool."""
+    values = {
+        "name": name,
+        "title": "Read secret" if name == "read_secret" else None,
+        "description": f"{name.replace('_', ' ').capitalize()}.",
+        "input_schema": {"type": "object"},
+        "output_schema": None,
+        **overrides,
+    }
+    return MCPTool(**values)
+
+
+def _mcp_discovery(*tools: MCPTool) -> MCPDiscoveryResult:
+    """Return a discovery result containing the supplied tools."""
+    return MCPDiscoveryResult(
+        server=_mcp_server_information(),
+        tools=tools,
+    )
 
 
 async def test_user_step_asks_for_service_type(hass):
@@ -232,11 +278,7 @@ async def test_service_menu_exposes_filtering_without_connecting(hass):
     """The menu performs no remote calls and exposes the unlocked filter page."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
+    flow._mcp_config = _mcp_server_config()
     flow.async_show_menu = MagicMock(return_value={"type": "menu"})
 
     with patch(
@@ -339,12 +381,7 @@ async def test_oauth_server_requires_authentication_before_filtering(hass):
     """OAuth settings are available before, and filtering only after, auth."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-        use_oauth=True,
-    )
+    flow._mcp_config = _mcp_server_config(use_oauth=True)
     flow.async_show_menu = MagicMock(return_value={"type": "menu"})
 
     await flow.async_step_service_menu()
@@ -370,12 +407,7 @@ async def test_oauth_callback_completion_returns_to_service_menu(hass):
     """A successful OAuth callback runs pending discovery and keeps the draft."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-        use_oauth=True,
-    )
+    flow._mcp_config = _mcp_server_config(use_oauth=True)
     flow._mcp_options = {
         CONF_MCP_PERFORM_TOOL_DISCOVERY: True,
         CONF_MCP_PROVIDE_DEFAULT_PROMPT: True,
@@ -401,12 +433,7 @@ async def test_oauth_callback_completion_returns_to_service_menu(hass):
 async def test_oauth_settings_confirm_discovers_metadata(hass):
     """OAuth metadata is fetched only after the OAuth Settings form is submitted."""
     flow = _config_flow(hass)
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-        use_oauth=True,
-    )
+    flow._mcp_config = _mcp_server_config(use_oauth=True)
     flow.async_show_form = MagicMock(return_value={"type": "form"})
     flow._async_start_mcp_oauth = AsyncMock(return_value={"type": "external"})
     flow._mcp_error_reason = "oauth_discovery_failed"
@@ -451,12 +478,7 @@ async def test_oauth_settings_confirm_discovers_metadata(hass):
 async def test_oauth_settings_can_return_to_service_menu(hass):
     """The OAuth settings action can leave without starting discovery."""
     flow = _config_flow(hass)
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-        use_oauth=True,
-    )
+    flow._mcp_config = _mcp_server_config(use_oauth=True)
     flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
 
     with patch(
@@ -568,12 +590,7 @@ async def test_oauth_discovery_failure_is_retained_on_service_menu(hass):
     """OAuth discovery failures remain visible after returning to the menu."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-        use_oauth=True,
-    )
+    flow._mcp_config = _mcp_server_config(use_oauth=True)
     flow.async_show_menu = MagicMock(return_value={"type": "menu"})
 
     error_text = "Failed to discover OAuth settings from the configured server URL."
@@ -782,11 +799,7 @@ async def test_service_menu_offers_optional_review_and_immediate_save(hass):
     """Valid MCP policies allow saving whether or not review has been opened."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
+    flow._mcp_config = _mcp_server_config()
     assert not flow._set_mcp_service_config(flow._mcp_policy_values())
     flow.async_show_menu = MagicMock(return_value={"type": "menu"})
 
@@ -802,11 +815,7 @@ async def test_reconfigure_menu_keeps_existing_service_type(hass):
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
     flow._reconfigure_entry = MagicMock()
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
+    flow._mcp_config = _mcp_server_config()
     flow.async_show_menu = MagicMock(return_value={"type": "menu"})
 
     await flow.async_step_service_menu()
@@ -820,12 +829,7 @@ async def test_reconfigure_restores_discovery_with_refreshable_oauth(hass):
     """Reconfigure refreshes OAuth and restores the requested tool catalogue."""
     flow = _config_flow(hass)
     config = MCPServiceConfig(
-        server=MCPServerConfig(
-            name="Vault MCP",
-            server_id="vault",
-            url="https://mcp.example.com/api",
-            use_oauth=True,
-        )
+        server=_mcp_server_config(use_oauth=True)
     )
     old_token = {
         "access_token": "expired-token",
@@ -901,28 +905,9 @@ async def test_reconfigure_restores_discovery_with_refreshable_oauth(hass):
 async def test_requested_initial_discovery_caches_catalogue(hass):
     """The server submission's requested discovery retrieves one catalogue."""
     flow = _config_flow(hass)
-    config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
-    discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(
-            MCPTool(
-                name="read_secret",
-                title="Read secret",
-                description="Read a stored secret.",
-                input_schema={"type": "object"},
-                output_schema=None,
-            ),
-        ),
+    config = _mcp_server_config()
+    discovery = _mcp_discovery(
+        _mcp_tool(description="Read a stored secret."),
     )
     flow._mcp_config = config
     flow._mcp_options = {
@@ -948,39 +933,14 @@ async def test_requested_initial_discovery_caches_catalogue(hass):
 async def test_filter_tools_step_displays_catalogue_policy_options(hass):
     """Successful discovery exposes permanent and disabled tool controls."""
     flow = _config_flow(hass)
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
+    flow._mcp_config = _mcp_server_config()
     flow._mcp_options = {
         CONF_MCP_PERFORM_TOOL_DISCOVERY: True,
         CONF_MCP_ON_DEMAND_DISCOVERY: True,
     }
-    flow._mcp_discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(
-            MCPTool(
-                name="read_secret",
-                title="Read secret",
-                description="Read a stored secret.",
-                input_schema={"type": "object"},
-                output_schema=None,
-            ),
-            MCPTool(
-                name="write_secret",
-                title=None,
-                description="Write a stored secret.",
-                input_schema={"type": "object"},
-                output_schema=None,
-            ),
-        ),
+    flow._mcp_discovery = _mcp_discovery(
+        _mcp_tool(description="Read a stored secret."),
+        _mcp_tool("write_secret", description="Write a stored secret."),
     )
     flow.async_show_form = MagicMock(return_value={"type": "form"})
 
@@ -1022,11 +982,7 @@ async def test_filter_tools_step_displays_catalogue_policy_options(hass):
 async def test_filter_tools_without_catalogue_only_displays_regex_options(hass):
     """Manual tool selectors require a discovered catalogue."""
     flow = _config_flow(hass)
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
+    flow._mcp_config = _mcp_server_config()
     flow._mcp_options = {
         CONF_MCP_PERFORM_TOOL_DISCOVERY: False,
         CONF_MCP_ON_DEMAND_DISCOVERY: True,
@@ -1046,28 +1002,9 @@ async def test_filter_tools_without_catalogue_only_displays_regex_options(hass):
 async def test_filter_submission_clears_omitted_optional_values(hass):
     """Clearing optional filter fields replaces their previously saved values."""
     flow = _config_flow(hass)
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
-    flow._mcp_discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(
-            MCPTool(
-                name="read_secret",
-                title="Read secret",
-                description="Read a stored secret.",
-                input_schema={"type": "object"},
-                output_schema=None,
-            ),
-        ),
+    flow._mcp_config = _mcp_server_config()
+    flow._mcp_discovery = _mcp_discovery(
+        _mcp_tool(description="Read a stored secret."),
     )
     flow._mcp_options = {
         CONF_MCP_PERFORM_TOOL_DISCOVERY: True,
@@ -1102,31 +1039,14 @@ async def test_filter_submission_can_be_reviewed_and_saved(hass):
     """Saved tool settings can be reviewed before the MCP service is saved."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-        description="Storage tools",
-    )
-    flow._mcp_discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(
-            MCPTool(
-                name="read_secret",
-                title="Read secret",
-                description="Read a stored secret.",
-                input_schema={
-                    "type": "object",
-                    "properties": {"key": {"type": "string"}},
-                },
-                output_schema=None,
-            ),
+    flow._mcp_config = _mcp_server_config(description="Storage tools")
+    flow._mcp_discovery = _mcp_discovery(
+        _mcp_tool(
+            description="Read a stored secret.",
+            input_schema={
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+            },
         ),
     )
     flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
@@ -1197,11 +1117,7 @@ async def test_mcp_without_initial_discovery_can_be_reviewed_and_saved(hass):
     """A service without initial discovery can be reviewed and saved."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
+    flow._mcp_config = _mcp_server_config()
     flow._mcp_discovery = None
     flow._mcp_options = {
         CONF_MCP_PERFORM_TOOL_DISCOVERY: False,
@@ -1231,21 +1147,8 @@ async def test_mcp_without_initial_discovery_can_be_reviewed_and_saved(hass):
 async def test_mcp_filter_tools_rejects_tool_outside_discovered_catalogue(hass):
     """Crafted tool selections cannot escape the discovered catalogue."""
     flow = _config_flow(hass)
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
-    flow._mcp_discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(),
-    )
+    flow._mcp_config = _mcp_server_config()
+    flow._mcp_discovery = _mcp_discovery()
     flow._mcp_options = {
         CONF_MCP_PERFORM_TOOL_DISCOVERY: True,
         CONF_MCP_PROVIDE_DEFAULT_PROMPT: True,
@@ -1276,27 +1179,9 @@ async def test_mcp_filter_tools_rejects_tool_outside_discovered_catalogue(hass):
 async def test_mcp_filter_tools_rejects_permanent_disabled_conflict(hass):
     """The filter form flags tools selected for both policy sets."""
     flow = _config_flow(hass)
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
-    tool = MCPTool(
-        name="read_secret",
-        title="Read secret",
-        description="Read a stored secret.",
-        input_schema={"type": "object"},
-        output_schema=None,
-    )
-    flow._mcp_discovery = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(tool,),
+    flow._mcp_config = _mcp_server_config()
+    flow._mcp_discovery = _mcp_discovery(
+        _mcp_tool(description="Read a stored secret."),
     )
     flow._mcp_options = {
         CONF_MCP_PERFORM_TOOL_DISCOVERY: True,
@@ -1328,11 +1213,7 @@ async def test_initial_discovery_failure_retains_server_draft(hass):
     """Failed discovery is informational and retains the server configuration."""
     flow = _config_flow(hass)
     flow._selected_service_type = SERVICE_TYPE_MCP
-    config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
+    config = _mcp_server_config()
     flow._mcp_config = config
     flow._mcp_options = {CONF_MCP_PERFORM_TOOL_DISCOVERY: True}
 
@@ -1353,19 +1234,9 @@ async def test_initial_discovery_failure_retains_server_draft(hass):
 async def test_disabled_initial_discovery_only_checks_connection(hass):
     """Disabling initial discovery initializes once without listing tools."""
     flow = _config_flow(hass)
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-    )
+    flow._mcp_config = _mcp_server_config()
     flow._mcp_options = {CONF_MCP_PERFORM_TOOL_DISCOVERY: False}
-    server_information = MCPServerInformation(
-        name="Vault Server",
-        version="1.0.0",
-        protocol_version="2025-06-18",
-        instructions=None,
-        capabilities={},
-    )
+    server_information = _mcp_server_information()
 
     with (
         patch(

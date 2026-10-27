@@ -782,18 +782,6 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
 
         return self._show_mcp_credentials_form()
 
-    async def async_step_credentials_choice(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Continue an older in-progress flow using issuer-bound credentials."""
-        return await self._async_start_mcp_oauth()
-
-    async def async_step_new_credentials(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Continue an older in-progress flow at the MCP credentials form."""
-        return await self.async_step_mcp_credentials(user_input)
-
     async def async_step_mcp_credentials(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:

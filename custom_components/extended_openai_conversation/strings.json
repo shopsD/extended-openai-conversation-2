@@ -85,14 +85,6 @@
         },
         "submit": "Continue"
       },
-      "credentials_choice": {
-        "title": "Choose OAuth credentials",
-        "description": "Use existing Home Assistant Application Credentials for this authorization server, or add new credentials.",
-        "menu_options": {
-          "pick_implementation": "Use existing credentials",
-          "new_credentials": "Add new credentials"
-        }
-      },
       "mcp_credentials": {
         "title": "MCP OAuth application credentials",
         "description": "The authorization server does not have reusable credentials and could not register Home Assistant automatically. Enter a client registered with this redirect URI:\n\n`{redirect_uri}`",
@@ -163,8 +155,7 @@
       "invalid_tool_name_pattern": "Enter a valid regular expression.",
       "mcp_discovery_required": "Discover the MCP server before selecting permanent tools.",
       "invalid_url": "Enter a valid HTTP or HTTPS URL.",
-      "unknown": "[%key:common::config_flow::error::unknown%]",
-      "mcp_tool_discovery_failed": "Unable to retrieve tools from the MCP server."
+      "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
       "entry_not_loaded": "The configuration entry must be loaded before it can be changed.",
