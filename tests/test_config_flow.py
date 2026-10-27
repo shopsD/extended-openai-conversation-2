@@ -1043,6 +1043,61 @@ async def test_filter_tools_without_catalogue_only_displays_regex_options(hass):
     }
 
 
+async def test_filter_submission_clears_omitted_optional_values(hass):
+    """Clearing optional filter fields replaces their previously saved values."""
+    flow = _config_flow(hass)
+    flow._mcp_config = MCPServerConfig(
+        name="Vault MCP",
+        server_id="vault",
+        url="https://mcp.example.com/api",
+    )
+    flow._mcp_discovery = MCPDiscoveryResult(
+        server=MCPServerInformation(
+            name="Vault Server",
+            version="1.0.0",
+            protocol_version="2025-06-18",
+            instructions=None,
+            capabilities={},
+        ),
+        tools=(
+            MCPTool(
+                name="read_secret",
+                title="Read secret",
+                description="Read a stored secret.",
+                input_schema={"type": "object"},
+                output_schema=None,
+            ),
+        ),
+    )
+    flow._mcp_options = {
+        CONF_MCP_PERFORM_TOOL_DISCOVERY: True,
+        CONF_MCP_PROVIDE_DEFAULT_PROMPT: True,
+        CONF_MCP_PERMANENT_TOOL_MODE: "selected",
+        CONF_MCP_PERMANENT_TOOLS: ["read_secret"],
+        CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: False,
+        CONF_MCP_ON_DEMAND_DISCOVERY: True,
+        CONF_MCP_DISABLED_TOOL_MODE: "selected",
+        CONF_MCP_DISABLED_TOOLS: ["read_secret"],
+        CONF_MCP_TOOL_NAME_PATTERN: ".*delete.*",
+        CONF_MCP_REGEX_TIMEOUT: 0.1,
+    }
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
+
+    result = await flow.async_step_mcp_filter_tools(
+        {
+            CONF_MCP_PERMANENT_TOOL_MODE: "selected",
+            CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: False,
+            CONF_MCP_DISABLED_TOOL_MODE: "selected",
+            CONF_MCP_REGEX_TIMEOUT: 0.1,
+        }
+    )
+
+    assert result == {"type": "menu"}
+    assert flow._mcp_options[CONF_MCP_PERMANENT_TOOLS] == []
+    assert flow._mcp_options[CONF_MCP_DISABLED_TOOLS] == []
+    assert flow._mcp_options[CONF_MCP_TOOL_NAME_PATTERN] == ""
+
+
 async def test_filter_submission_can_be_reviewed_and_saved(hass):
     """Saved tool settings can be reviewed before the MCP service is saved."""
     flow = _config_flow(hass)

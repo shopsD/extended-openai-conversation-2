@@ -1019,7 +1019,20 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
 
         errors: dict[str, str] = {}
         if user_input is not None:
-            options = {**self._mcp_policy_values(), **user_input}
+            current_options = self._mcp_policy_values()
+            submitted_options = dict(user_input)
+            if (
+                current_options[CONF_MCP_PERFORM_TOOL_DISCOVERY]
+                and self._mcp_discovery is not None
+            ):
+                submitted_options.setdefault(CONF_MCP_PERMANENT_TOOLS, [])
+            if current_options[CONF_MCP_ON_DEMAND_DISCOVERY]:
+                submitted_options.setdefault(
+                    CONF_MCP_TOOL_NAME_PATTERN, DEFAULT_MCP_TOOL_NAME_PATTERN
+                )
+                if self._mcp_discovery is not None:
+                    submitted_options.setdefault(CONF_MCP_DISABLED_TOOLS, [])
+            options = {**current_options, **submitted_options}
             errors = self._set_mcp_service_config(options)
             if not errors:
                 return await self.async_step_service_menu()
