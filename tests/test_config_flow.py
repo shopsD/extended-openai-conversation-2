@@ -666,12 +666,7 @@ async def test_oauth_reuses_credentials_for_discovered_issuer(hass):
 async def test_oauth_dynamically_registers_and_imports_credentials(hass):
     """An advertised registration endpoint creates reusable HA credentials."""
     flow = _config_flow(hass)
-    flow._mcp_config = MCPServerConfig(
-        name="Vault MCP",
-        server_id="vault",
-        url="https://mcp.example.com/api",
-        use_oauth=True,
-    )
+    flow._mcp_config = _mcp_server_config(use_oauth=True)
     flow._mcp_oauth_data = {
         "authorization_url": "https://auth.example.com/authorize",
         "token_url": "https://auth.example.com/token",
@@ -857,16 +852,7 @@ async def test_reconfigure_restores_discovery_with_refreshable_oauth(hass):
     flow._get_reconfigure_entry = MagicMock(return_value=entry)
     flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
     managed_auth = MagicMock(spec=httpx.Auth)
-    discovery_result = MCPDiscoveryResult(
-        server=MCPServerInformation(
-            name="Vault Server",
-            version="1.0.0",
-            protocol_version="2025-06-18",
-            instructions=None,
-            capabilities={},
-        ),
-        tools=(),
-    )
+    discovery_result = _mcp_discovery()
 
     async def refresh_during_discovery(*_args, **_kwargs) -> MCPDiscoveryResult:
         entry.data = {**entry.data, CONF_TOKEN: refreshed_token}
