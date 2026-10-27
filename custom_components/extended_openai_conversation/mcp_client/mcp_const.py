@@ -11,7 +11,6 @@ CONF_MCP_OAUTH_SCOPE = "scope"
 CONF_MCP_OAUTH_ISSUER = "oauth_issuer"
 CONF_MCP_OAUTH_REGISTRATION_URL = "oauth_registration_url"
 
-CONF_MCP_CATALOGUE_ID = "catalogue_id"
 CONF_MCP_SERVER_INFORMATION = "server_information"
 CONF_MCP_PERFORM_TOOL_DISCOVERY = "perform_tool_discovery"
 CONF_MCP_PROVIDE_DEFAULT_PROMPT = "provide_default_prompt"

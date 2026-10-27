@@ -5,7 +5,6 @@ from .mcp_client import MCPClient
 from .mcp_client_config_flow import MCPClientConfigFlow, MCPClientConfigFlowResult
 from .mcp_const import (
     CONF_MCP_AUTHORIZATION_URL,
-    CONF_MCP_CATALOGUE_ID,
     CONF_MCP_DESCRIPTION,
     CONF_MCP_DISABLED_TOOL_MODE,
     CONF_MCP_DISABLED_TOOLS,
@@ -69,7 +68,6 @@ from .service_config import MCPServiceConfig
 
 __all__ = [
     "CONF_MCP_AUTHORIZATION_URL",
-    "CONF_MCP_CATALOGUE_ID",
     "CONF_MCP_DESCRIPTION",
     "CONF_MCP_DISABLED_TOOLS",
     "CONF_MCP_DISABLED_TOOL_MODE",

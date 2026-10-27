@@ -132,11 +132,6 @@
         "title": "Review MCP context",
         "description": "Connection succeeded: {connection_status}\n\nInitial discovery succeeded: {discovery_status}\n\nDiscovered tools: {discovered_tool_count}\n\nPermanent selection uses selected tools: {permanent_tools_selected}\n\nResolved permanent tools: {selected_tool_count}\n\nSchemas included: {schemas_included}\n\nDefault MCP prompt: {default_prompt}\n\nOn-demand discovery: {on_demand_discovery}\n\nDisabled selection disables selected tools: {disabled_tools_selected}\n\nSelected disabled tools: {disabled_tool_count}\n\nTool-name regular expression: {tool_name_pattern}\n\nRegular-expression timeout: {regex_timeout} seconds\n\nPermanent context size: {character_count} characters ({byte_count} bytes)\n\nEstimated context cost per request: approximately {estimated_tokens} tokens",
         "submit": "Return to workflow"
-      },
-      "ai_endpoint_review": {
-        "title": "Review AI endpoint",
-        "description": "Name: {name}\n\nBase URL: {base_url}",
-        "submit": "Return to workflow"
       }
     },
     "error": {

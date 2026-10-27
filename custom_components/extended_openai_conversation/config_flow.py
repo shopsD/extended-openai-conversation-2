@@ -1195,20 +1195,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             return {err.field: err.code}
 
         self._mcp_service_config = service_config
-        self._mcp_options = {
-            CONF_MCP_PERFORM_TOOL_DISCOVERY: service_config.perform_tool_discovery,
-            CONF_MCP_PROVIDE_DEFAULT_PROMPT: service_config.provide_default_prompt,
-            CONF_MCP_PERMANENT_TOOL_MODE: service_config.permanent_tool_mode,
-            CONF_MCP_PERMANENT_TOOLS: list(service_config.permanent_tool_selection),
-            CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: (
-                service_config.include_permanent_schemas
-            ),
-            CONF_MCP_ON_DEMAND_DISCOVERY: service_config.on_demand_discovery,
-            CONF_MCP_DISABLED_TOOL_MODE: service_config.disabled_tool_mode,
-            CONF_MCP_DISABLED_TOOLS: list(service_config.disabled_tools),
-            CONF_MCP_TOOL_NAME_PATTERN: service_config.tool_name_pattern,
-            CONF_MCP_REGEX_TIMEOUT: service_config.regex_timeout,
-        }
+        self._mcp_options = service_config.to_policy_dict()
         return {}
 
     async def async_step_mcp_review(
@@ -1280,36 +1267,15 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
     async def async_step_service_review(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Review the currently selected service configuration."""
-        if self._selected_service_type == SERVICE_TYPE_MCP:
-            if user_input is None:
-                self._mcp_error_reason = None
-            return await self.async_step_mcp_review(user_input)
-        if self._ai_endpoint_data is None:
-            return await self.async_step_service_menu()
-        if user_input is not None:
-            return await self.async_step_service_menu()
-        return self.async_show_form(
-            step_id="ai_endpoint_review",
-            data_schema=vol.Schema({}),
-            description_placeholders={
-                "name": str(self._ai_endpoint_data.get(CONF_NAME, DEFAULT_NAME)),
-                "base_url": str(
-                    self._ai_endpoint_data.get(CONF_BASE_URL, DEFAULT_CONF_BASE_URL)
-                ),
-            },
-        )
-
-    async def async_step_ai_endpoint_review(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle the AI endpoint review form's submitted step ID."""
-        return await self.async_step_service_review(user_input)
+        """Review the current MCP service configuration."""
+        if user_input is None:
+            self._mcp_error_reason = None
+        return await self.async_step_mcp_review(user_input)
 
     async def async_step_service_save(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Persist a locally validated and reviewed service configuration."""
+        """Persist the locally validated service configuration."""
         data = self._service_configuration()
         if data is None:
             return await self.async_step_service_menu()
@@ -1381,18 +1347,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             service_config = MCPServiceConfig.from_dict(entry.data)
             self._mcp_config = service_config.server
             self._mcp_discovery = None
-            self._mcp_options = {
-                CONF_MCP_PERFORM_TOOL_DISCOVERY: service_config.perform_tool_discovery,
-                CONF_MCP_PROVIDE_DEFAULT_PROMPT: service_config.provide_default_prompt,
-                CONF_MCP_PERMANENT_TOOL_MODE: service_config.permanent_tool_mode,
-                CONF_MCP_PERMANENT_TOOLS: list(service_config.permanent_tool_selection),
-                CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: service_config.include_permanent_schemas,
-                CONF_MCP_ON_DEMAND_DISCOVERY: service_config.on_demand_discovery,
-                CONF_MCP_DISABLED_TOOL_MODE: service_config.disabled_tool_mode,
-                CONF_MCP_DISABLED_TOOLS: list(service_config.disabled_tools),
-                CONF_MCP_TOOL_NAME_PATTERN: service_config.tool_name_pattern,
-                CONF_MCP_REGEX_TIMEOUT: service_config.regex_timeout,
-            }
+            self._mcp_options = service_config.to_policy_dict()
             self._mcp_service_config = service_config
             if service_config.server.use_oauth:
                 self._mcp_oauth_timeout = float(

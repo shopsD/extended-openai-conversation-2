@@ -9,7 +9,5 @@ from .service_config import MCPServiceConfig
 class MCPService:
     """One loaded MCP service and its host-independent configuration."""
 
-    entry_id: str
-    title: str
     config: MCPServiceConfig
     client: MCPClient

@@ -58,8 +58,6 @@ def _service(
     client = MagicMock(spec=MCPClient)
     client.list_tools = AsyncMock(return_value=tools)
     return MCPService(
-        entry_id=f"{server_id}-entry",
-        title=f"{server_id.title()} Server",
         config=config,
         client=client,
     )

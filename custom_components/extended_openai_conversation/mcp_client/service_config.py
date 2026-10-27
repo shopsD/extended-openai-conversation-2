@@ -57,11 +57,6 @@ class MCPServiceConfig:
     regex_timeout: float = DEFAULT_MCP_REGEX_TIMEOUT
     server_information: MCPServerInformation | None = None
 
-    @property
-    def permanent_tool_exposure(self) -> bool:
-        """Return whether the resolved permanent catalogue is non-empty."""
-        return bool(self.permanent_tools)
-
     def __post_init__(self) -> None:
         """Validate policy values that are independent of a host framework."""
         if self.permanent_tool_mode not in _FILTER_MODES:
@@ -242,13 +237,22 @@ class MCPServiceConfig:
         """Return a flat mapping suitable for host configuration storage."""
         data = {
             **self.server.to_dict(),
+            **self.to_policy_dict(),
+            CONF_MCP_PERMANENT_TOOL_CATALOGUE: [
+                tool.to_dict() for tool in self.permanent_tools
+            ],
+        }
+        if self.server_information is not None:
+            data[CONF_MCP_SERVER_INFORMATION] = self.server_information.to_dict()
+        return data
+
+    def to_policy_dict(self) -> dict[str, Any]:
+        """Return normalized tool-discovery policy values."""
+        return {
             CONF_MCP_PERFORM_TOOL_DISCOVERY: self.perform_tool_discovery,
             CONF_MCP_PROVIDE_DEFAULT_PROMPT: self.provide_default_prompt,
             CONF_MCP_PERMANENT_TOOL_MODE: self.permanent_tool_mode,
             CONF_MCP_PERMANENT_TOOLS: list(self.permanent_tool_selection),
-            CONF_MCP_PERMANENT_TOOL_CATALOGUE: [
-                tool.to_dict() for tool in self.permanent_tools
-            ],
             CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: self.include_permanent_schemas,
             CONF_MCP_ON_DEMAND_DISCOVERY: self.on_demand_discovery,
             CONF_MCP_DISABLED_TOOL_MODE: self.disabled_tool_mode,
@@ -256,6 +260,3 @@ class MCPServiceConfig:
             CONF_MCP_TOOL_NAME_PATTERN: self.tool_name_pattern,
             CONF_MCP_REGEX_TIMEOUT: self.regex_timeout,
         }
-        if self.server_information is not None:
-            data[CONF_MCP_SERVER_INFORMATION] = self.server_information.to_dict()
-        return data
