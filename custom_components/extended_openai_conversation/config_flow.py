@@ -400,8 +400,9 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             return await self.async_step_user()
 
         options: list[str] = []
-        allow_type_switch = self._reconfigure_entry is None
-        if self._selected_service_type == SERVICE_TYPE_MCP:
+        allow_type_switch: bool = self._reconfigure_entry is None
+        is_mcp: bool = self._selected_service_type == SERVICE_TYPE_MCP
+        if is_mcp:
             if allow_type_switch:
                 options.append("switch_to_ai_endpoint")
             options.append("mcp")
@@ -410,14 +411,13 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                     options.append("mcp_authenticate")
                 if not self._mcp_config.use_oauth or self._mcp_oauth_authenticated:
                     options.append("mcp_filter_tools")
+        elif allow_type_switch:
+            options.append("switch_to_mcp")
         else:
-            if allow_type_switch:
-                options.append("switch_to_mcp")
-            else:
-                options.append("ai_endpoint")
+            options.append("ai_endpoint")
 
         service_configuration = self._service_configuration()
-        is_mcp = self._selected_service_type == SERVICE_TYPE_MCP
+        
         if is_mcp and service_configuration is not None:
             options.append("service_review")
         if service_configuration is not None:
@@ -1062,32 +1062,32 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                     ): BooleanSelector(),
                 }
             )
-        if values[CONF_MCP_ON_DEMAND_DISCOVERY] and discovery is not None:
-            schema_fields.update(
-                {
-                    vol.Required(
-                        CONF_MCP_DISABLED_TOOL_MODE,
-                        default=values[CONF_MCP_DISABLED_TOOL_MODE],
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=mode_options,
-                            mode=SelectSelectorMode.DROPDOWN,
-                            translation_key="mcp_tool_filter_mode",
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_MCP_DISABLED_TOOLS,
-                        default=values[CONF_MCP_DISABLED_TOOLS],
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=tool_options,
-                            multiple=True,
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                }
-            )
         if values[CONF_MCP_ON_DEMAND_DISCOVERY]:
+            if discovery is not None:
+                schema_fields.update(
+                    {
+                        vol.Required(
+                            CONF_MCP_DISABLED_TOOL_MODE,
+                            default=values[CONF_MCP_DISABLED_TOOL_MODE],
+                        ): SelectSelector(
+                            SelectSelectorConfig(
+                                options=mode_options,
+                                mode=SelectSelectorMode.DROPDOWN,
+                                translation_key="mcp_tool_filter_mode",
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_MCP_DISABLED_TOOLS,
+                            default=values[CONF_MCP_DISABLED_TOOLS],
+                        ): SelectSelector(
+                            SelectSelectorConfig(
+                                options=tool_options,
+                                multiple=True,
+                                mode=SelectSelectorMode.DROPDOWN,
+                            )
+                        ),
+                    }
+                )
             schema_fields.update(
                 {
                     vol.Optional(
@@ -1271,7 +1271,7 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                     service_config.disabled_tool_mode == MCP_TOOL_FILTER_SELECTED
                 ),
                 "disabled_tool_count": str(len(service_config.disabled_tools)),
-                "tool_name_pattern": service_config.tool_name_pattern or "—",
+                "tool_name_pattern": service_config.tool_name_pattern or "",
                 "connection_status": self._status_icon(self._mcp_connection_status),
                 "discovery_status": self._status_icon(self._mcp_discovery_status),
                 "discovered_tool_count": str(
