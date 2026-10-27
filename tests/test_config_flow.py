@@ -144,6 +144,47 @@ def _mcp_discovery(*tools: MCPTool) -> MCPDiscoveryResult:
     )
 
 
+def _mcp_form_values(
+    config: MCPServerConfig, **overrides: Any
+) -> dict[str, Any]:
+    """Return a complete MCP server-form submission."""
+    return {
+        "name": config.name,
+        CONF_MCP_SERVER_ID: config.server_id,
+        CONF_MCP_DESCRIPTION: config.description,
+        CONF_MCP_SERVER_URL: config.url,
+        CONF_MCP_HEADERS: dict(config.headers),
+        CONF_MCP_USE_OAUTH: config.use_oauth,
+        CONF_MCP_PERFORM_TOOL_DISCOVERY: True,
+        CONF_MCP_PROVIDE_DEFAULT_PROMPT: True,
+        CONF_MCP_ON_DEMAND_DISCOVERY: True,
+        **overrides,
+    }
+
+
+def _configure_mcp_tool_policy(
+    flow: ExtendedOpenAIConversationConfigFlow,
+    *tools: MCPTool,
+    permanent: list[str],
+    disabled: list[str],
+) -> None:
+    """Give a flow a valid discovered tool policy for state tests."""
+    flow._mcp_discovery = _mcp_discovery(*tools)
+    flow._mcp_options = {
+        CONF_MCP_PERFORM_TOOL_DISCOVERY: True,
+        CONF_MCP_PROVIDE_DEFAULT_PROMPT: True,
+        CONF_MCP_PERMANENT_TOOL_MODE: "selected",
+        CONF_MCP_PERMANENT_TOOLS: permanent,
+        CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: False,
+        CONF_MCP_ON_DEMAND_DISCOVERY: True,
+        CONF_MCP_DISABLED_TOOL_MODE: "selected",
+        CONF_MCP_DISABLED_TOOLS: disabled,
+        CONF_MCP_TOOL_NAME_PATTERN: ".*delete.*",
+        CONF_MCP_REGEX_TIMEOUT: 0.1,
+    }
+    assert not flow._set_mcp_service_config(flow._mcp_policy_values())
+
+
 async def test_user_step_asks_for_service_type(hass):
     """The initial Add Service step asks which service type to configure."""
     flow = _config_flow(hass)
@@ -914,6 +955,146 @@ async def test_requested_initial_discovery_caches_catalogue(hass):
     assert flow._mcp_server_information is discovery.server
     assert flow._mcp_connection_status is True
     assert flow._mcp_discovery_status is True
+
+
+async def test_mcp_cosmetic_edit_preserves_discovery_and_tool_policy(hass):
+    """Changing display metadata does not invalidate the tool catalogue."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
+    flow._mcp_config = _mcp_server_config(description="Old description")
+    _configure_mcp_tool_policy(
+        flow, _mcp_tool(), permanent=["read_secret"], disabled=[]
+    )
+    flow._async_test_mcp_server = AsyncMock()
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
+
+    await flow.async_step_mcp(
+        _mcp_form_values(
+            flow._mcp_config,
+            name="Renamed Vault",
+            description="New description",
+        )
+    )
+
+    assert flow._mcp_discovery is not None
+    assert flow._mcp_options[CONF_MCP_PERMANENT_TOOLS] == ["read_secret"]
+    assert flow._mcp_options[CONF_MCP_TOOL_NAME_PATTERN] == ".*delete.*"
+    assert flow._mcp_service_config is not None
+    assert flow._mcp_service_config.server.name == "Renamed Vault"
+
+
+@pytest.mark.parametrize(
+    ("changed_value", "expected_value"),
+    [
+        ({CONF_MCP_HEADERS: {"Authorization": "Bearer replacement"}}, "headers"),
+        ({CONF_MCP_SERVER_URL: "https://new.example.com/mcp"}, "url"),
+    ],
+)
+async def test_mcp_connection_edit_preserves_policy_while_discovery_is_stale(
+    hass, changed_value, expected_value
+):
+    """Transport edits stale discovery without discarding filter choices."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
+    flow._mcp_config = _mcp_server_config()
+    _configure_mcp_tool_policy(
+        flow, _mcp_tool(), permanent=["read_secret"], disabled=[]
+    )
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "MCPClientConfigFlow.discover",
+        new=AsyncMock(side_effect=RuntimeError("discovery failed")),
+    ):
+        await flow.async_step_mcp(
+            _mcp_form_values(flow._mcp_config, **changed_value)
+        )
+
+    assert flow._mcp_discovery is None
+    assert flow._mcp_discovery_status is False
+    assert flow._mcp_options[CONF_MCP_PERMANENT_TOOLS] == ["read_secret"]
+    assert flow._mcp_options[CONF_MCP_TOOL_NAME_PATTERN] == ".*delete.*"
+    assert flow._mcp_service_config is not None
+    if expected_value == "headers":
+        assert flow._mcp_service_config.server.headers == changed_value[
+            CONF_MCP_HEADERS
+        ]
+    else:
+        assert flow._mcp_service_config.server.url == changed_value[
+            CONF_MCP_SERVER_URL
+        ]
+
+
+async def test_successful_rediscovery_prunes_only_missing_tool_selections(hass):
+    """An authoritative catalogue removes stale exact-name selections."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
+    flow._mcp_config = _mcp_server_config()
+    _configure_mcp_tool_policy(
+        flow,
+        _mcp_tool("keep"),
+        _mcp_tool("removed_permanent"),
+        _mcp_tool("removed_disabled"),
+        permanent=["keep", "removed_permanent"],
+        disabled=["removed_disabled"],
+    )
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "MCPClientConfigFlow.discover",
+        new=AsyncMock(return_value=_mcp_discovery(_mcp_tool("keep"))),
+    ):
+        await flow.async_step_mcp(
+            _mcp_form_values(
+                flow._mcp_config,
+                **{CONF_MCP_HEADERS: {"Authorization": "Bearer replacement"}},
+            )
+        )
+
+    assert flow._mcp_options[CONF_MCP_PERMANENT_TOOLS] == ["keep"]
+    assert flow._mcp_options[CONF_MCP_DISABLED_TOOLS] == []
+    assert flow._mcp_options[CONF_MCP_TOOL_NAME_PATTERN] == ".*delete.*"
+
+
+async def test_disabling_discovery_retains_draft_until_save(hass):
+    """Hidden tool selections are cleared only when the draft is saved."""
+    flow = _config_flow(hass)
+    flow._selected_service_type = SERVICE_TYPE_MCP
+    flow._mcp_config = _mcp_server_config()
+    _configure_mcp_tool_policy(
+        flow,
+        _mcp_tool("permanent"),
+        _mcp_tool("disabled"),
+        permanent=["permanent"],
+        disabled=["disabled"],
+    )
+    flow.async_step_service_menu = AsyncMock(return_value={"type": "menu"})
+
+    with patch(
+        "custom_components.extended_openai_conversation.config_flow."
+        "MCPClientConfigFlow.check_connection",
+        new=AsyncMock(return_value=_mcp_server_information()),
+    ):
+        await flow.async_step_mcp(
+            _mcp_form_values(
+                flow._mcp_config,
+                **{CONF_MCP_PERFORM_TOOL_DISCOVERY: False},
+            )
+        )
+
+    assert flow._mcp_options[CONF_MCP_PERMANENT_TOOLS] == ["permanent"]
+    assert flow._mcp_options[CONF_MCP_DISABLED_TOOLS] == ["disabled"]
+
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+    await flow.async_step_service_save()
+
+    entry_data = flow.async_create_entry.call_args.kwargs["data"]
+    assert entry_data[CONF_MCP_PERMANENT_TOOLS] == []
+    assert entry_data[CONF_MCP_DISABLED_TOOLS] == []
+    assert entry_data["permanent_tool_catalogue"] == []
+    assert entry_data[CONF_MCP_TOOL_NAME_PATTERN] == ".*delete.*"
 
 
 async def test_filter_tools_step_displays_catalogue_policy_options(hass):

@@ -195,6 +195,23 @@ MCP_ERROR_SERVER_NOT_FOUND = "mcp_server_not_found"
 MCP_ERROR_UNKNOWN = "unknown_mcp_error"
 
 
+def _mcp_connection_changed(
+    previous: MCPServerConfig | None, current: MCPServerConfig
+) -> bool:
+    """Return whether the remote endpoint or its transport settings changed."""
+    if previous is None:
+        return True
+    return (
+        previous.url,
+        dict(previous.headers),
+        previous.use_oauth,
+    ) != (
+        current.url,
+        dict(current.headers),
+        current.use_oauth,
+    )
+
+
 def _mcp_failure_reason(error: BaseException, default: str) -> str:
     """Map nested transport failures to a localized config-flow reason."""
     pending: list[BaseException] = [error]
@@ -553,12 +570,24 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         if result.config is not None:
             assert user_input is not None
             previous_config = self._mcp_config
+            connection_changed = _mcp_connection_changed(previous_config, result.config)
             if result.config != self._mcp_config:
-                self._mcp_discovery = None
-                self._mcp_server_information = None
-                self._mcp_options = None
-                self._mcp_service_config = None
                 self._mcp_error_reason = None
+                if connection_changed:
+                    self._mcp_discovery = None
+                    self._mcp_server_information = None
+                    self._mcp_connection_status = None
+                    self._mcp_discovery_status = None
+                if self._mcp_service_config is not None:
+                    self._mcp_service_config = replace(
+                        self._mcp_service_config,
+                        server=result.config,
+                        server_information=(
+                            None
+                            if connection_changed
+                            else self._mcp_service_config.server_information
+                        ),
+                    )
             if self._oauth_connection_changed(previous_config, result.config):
                 self._mcp_oauth_data = None
                 self._mcp_oauth_from_entry = False
@@ -581,29 +610,15 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                     DEFAULT_MCP_ON_DEMAND_DISCOVERY,
                 ),
             }
-            if not self._mcp_options[CONF_MCP_PERFORM_TOOL_DISCOVERY]:
-                self._mcp_discovery = None
-                self._mcp_options.update(
-                    {
-                        CONF_MCP_PERMANENT_TOOLS: [],
-                        CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: False,
-                        CONF_MCP_DISABLED_TOOLS: [],
-                    }
-                )
-            if not self._mcp_options[CONF_MCP_ON_DEMAND_DISCOVERY]:
-                self._mcp_options.update(
-                    {
-                        CONF_MCP_DISABLED_TOOL_MODE: DEFAULT_MCP_DISABLED_TOOL_MODE,
-                        CONF_MCP_DISABLED_TOOLS: [],
-                        CONF_MCP_TOOL_NAME_PATTERN: DEFAULT_MCP_TOOL_NAME_PATTERN,
-                    }
-                )
             if result.config.use_oauth and not self._mcp_oauth_authenticated:
                 self._mcp_connection_status = None
                 self._mcp_discovery_status = None
-                self._set_mcp_service_config(self._mcp_policy_values())
             else:
                 await self._async_test_mcp_server(run_requested_discovery=True)
+            if self._mcp_discovery is not None:
+                self._reconcile_mcp_tool_selections()
+                self._set_mcp_service_config(self._mcp_policy_values())
+            elif self._mcp_service_config is None:
                 self._set_mcp_service_config(self._mcp_policy_values())
             return await self.async_step_service_menu()
 
@@ -1192,6 +1207,74 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
             **(self._mcp_options or {}),
         }
 
+    def _reconcile_mcp_tool_selections(self) -> None:
+        """Discard selected names absent from a successful discovery result."""
+        if self._mcp_discovery is None or self._mcp_options is None:
+            return
+        available_names = {tool.name for tool in self._mcp_discovery.tools}
+        for key in (CONF_MCP_PERMANENT_TOOLS, CONF_MCP_DISABLED_TOOLS):
+            if key in self._mcp_options:
+                self._mcp_options[key] = [
+                    name
+                    for name in self._mcp_options[key]
+                    if name in available_names
+                ]
+
+    def _finalize_mcp_service_config(self) -> dict[str, str]:
+        """Normalize the draft policy immediately before saving."""
+        if self._mcp_config is None:
+            return {"base": "mcp_invalid_flow_state"}
+        if self._mcp_discovery is not None:
+            self._reconcile_mcp_tool_selections()
+        options = self._mcp_policy_values()
+        if not options[CONF_MCP_PERFORM_TOOL_DISCOVERY]:
+            options.update(
+                {
+                    CONF_MCP_PERMANENT_TOOL_MODE: DEFAULT_MCP_PERMANENT_TOOL_MODE,
+                    CONF_MCP_PERMANENT_TOOLS: [],
+                    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS: False,
+                    CONF_MCP_DISABLED_TOOLS: [],
+                }
+            )
+        if not options[CONF_MCP_ON_DEMAND_DISCOVERY]:
+            options.update(
+                {
+                    CONF_MCP_DISABLED_TOOL_MODE: DEFAULT_MCP_DISABLED_TOOL_MODE,
+                    CONF_MCP_DISABLED_TOOLS: [],
+                    CONF_MCP_TOOL_NAME_PATTERN: DEFAULT_MCP_TOOL_NAME_PATTERN,
+                }
+            )
+        if self._mcp_discovery is not None:
+            return self._set_mcp_service_config(options)
+        if self._mcp_service_config is None or not options[
+            CONF_MCP_PERFORM_TOOL_DISCOVERY
+        ]:
+            return self._set_mcp_service_config(options)
+
+        try:
+            self._mcp_service_config = replace(
+                self._mcp_service_config,
+                server=self._mcp_config,
+                perform_tool_discovery=options[CONF_MCP_PERFORM_TOOL_DISCOVERY],
+                provide_default_prompt=options[CONF_MCP_PROVIDE_DEFAULT_PROMPT],
+                permanent_tool_mode=options[CONF_MCP_PERMANENT_TOOL_MODE],
+                permanent_tool_selection=tuple(
+                    options[CONF_MCP_PERMANENT_TOOLS]
+                ),
+                include_permanent_schemas=options[
+                    CONF_MCP_INCLUDE_PERMANENT_SCHEMAS
+                ],
+                on_demand_discovery=options[CONF_MCP_ON_DEMAND_DISCOVERY],
+                disabled_tool_mode=options[CONF_MCP_DISABLED_TOOL_MODE],
+                disabled_tools=tuple(options[CONF_MCP_DISABLED_TOOLS]),
+                tool_name_pattern=options[CONF_MCP_TOOL_NAME_PATTERN],
+                regex_timeout=options[CONF_MCP_REGEX_TIMEOUT],
+                server_information=self._mcp_server_information,
+            )
+        except MCPConfigError as err:
+            return {err.field: err.code}
+        return {}
+
     def _set_mcp_service_config(self, options: dict[str, Any]) -> dict[str, str]:
         """Validate MCP policies and retain their normalized service config."""
         if self._mcp_config is None:
@@ -1300,6 +1383,11 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Persist the locally validated service configuration."""
+        if (
+            self._selected_service_type == SERVICE_TYPE_MCP
+            and self._finalize_mcp_service_config()
+        ):
+            return await self.async_step_service_menu()
         data = self._service_configuration()
         if data is None:
             return await self.async_step_service_menu()
@@ -1508,10 +1596,9 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
         if previous is None:
             return current.use_oauth
         return (
-            previous.server_id,
             previous.url,
             previous.use_oauth,
-        ) != (current.server_id, current.url, current.use_oauth)
+        ) != (current.url, current.use_oauth)
 
     @classmethod
     @callback
