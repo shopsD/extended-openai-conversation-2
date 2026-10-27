@@ -623,7 +623,9 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 ): str,
                 vol.Optional(
                     CONF_MCP_DESCRIPTION,
-                    default=values.get(CONF_MCP_DESCRIPTION, ""),
+                    description={
+                        "suggested_value":values.get(CONF_MCP_DESCRIPTION, ""),
+                    }
                 ): str,
                 vol.Required(CONF_MCP_SERVER_URL): str,
                 vol.Optional(
@@ -1092,7 +1094,9 @@ class ExtendedOpenAIConversationConfigFlow(AbstractOAuth2FlowHandler, domain=DOM
                 {
                     vol.Optional(
                         CONF_MCP_TOOL_NAME_PATTERN,
-                        default=values[CONF_MCP_TOOL_NAME_PATTERN],
+                        description={
+                            "suggested_value":values[CONF_MCP_TOOL_NAME_PATTERN],
+                        },
                     ): str,
                     vol.Required(
                         CONF_MCP_REGEX_TIMEOUT,
