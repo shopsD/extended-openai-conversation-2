@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import base64
+import binascii
 from collections.abc import AsyncGenerator
 import json
 import logging
 from mimetypes import guess_file_type
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from openai import AsyncClient, AsyncStream
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionChunk,
     ChatCompletionContentPartImageParam,
+    ChatCompletionContentPartInputAudioParam,
     ChatCompletionContentPartTextParam,
     ChatCompletionMessageParam,
     ChatCompletionSystemMessageParam,
@@ -79,6 +81,20 @@ _LOGGER = logging.getLogger(__name__)
 MAX_TOOL_ITERATIONS = 20
 
 _NATIVE_TOOL_CALL_EXTRA_CONTENT_KEY = "tool_call_extra_content_by_id"
+
+_SUPPORTED_IMAGE_MIME_TYPES = {
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
+
+_SUPPORTED_AUDIO_MIME_TYPES: dict[str, Literal["mp3", "wav"]] = {
+    "audio/mp3": "mp3",
+    "audio/mpeg": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+}
 
 
 def _shorten_tool_call_id(tool_call_id: str) -> str:
@@ -186,6 +202,125 @@ def _tool_result_data(content: conversation.ToolResultContent) -> Any:
     return content.tool_result
 
 
+def _extract_mcp_media_content(
+    result: Any,
+) -> tuple[
+    Any,
+    list[
+        ChatCompletionContentPartImageParam
+        | ChatCompletionContentPartInputAudioParam
+    ],
+]:
+    """Extract standard MCP image and audio blocks for native model input."""
+    if not isinstance(result, dict) or not isinstance(result.get("content"), list):
+        return result, []
+
+    media_parts: list[
+        ChatCompletionContentPartImageParam
+        | ChatCompletionContentPartInputAudioParam
+    ] = []
+    serialized_content: list[Any] = []
+    for item in result["content"]:
+        if not isinstance(item, dict) or item.get("type") not in {"audio", "image"}:
+            serialized_content.append(item)
+            continue
+
+        content_type = item["type"]
+        mime_type = item.get("mimeType")
+        data = item.get("data")
+        if content_type == "image" and mime_type == "image/jpg":
+            mime_type = "image/jpeg"
+
+        summary = dict(item)
+        if not isinstance(mime_type, str):
+            summary["media_error"] = {
+                "code": "unsupported_mime_type",
+                "message": (
+                    "The media could not be attached because its MIME type is "
+                    "missing or invalid. The original media data is included."
+                ),
+            }
+            serialized_content.append(summary)
+            continue
+        if content_type == "image":
+            supported = mime_type in _SUPPORTED_IMAGE_MIME_TYPES
+        else:
+            supported = mime_type in _SUPPORTED_AUDIO_MIME_TYPES
+        if not supported:
+            summary["media_error"] = {
+                "code": "unsupported_mime_type",
+                "message": (
+                    "This media type cannot be attached natively. The original "
+                    "base64 media data is included in this tool result."
+                ),
+            }
+            serialized_content.append(summary)
+            continue
+        if not isinstance(data, str):
+            summary["media_error"] = {
+                "code": "missing_data",
+                "message": "The media could not be attached because it has no data.",
+            }
+            serialized_content.append(summary)
+            continue
+        try:
+            base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            summary["media_error"] = {
+                "code": "invalid_base64_data",
+                "message": (
+                    "The media could not be attached because its data is not valid "
+                    "base64. The original data is included in this tool result."
+                ),
+            }
+            serialized_content.append(summary)
+            continue
+
+        summary.pop("data", None)
+        summary["mimeType"] = mime_type
+        summary["attached_to_model"] = True
+        serialized_content.append(summary)
+        if content_type == "image":
+            media_parts.append(
+                ChatCompletionContentPartImageParam(
+                    type="image_url",
+                    image_url={"url": f"data:{mime_type};base64,{data}"},
+                )
+            )
+        else:
+            media_parts.append(
+                ChatCompletionContentPartInputAudioParam(
+                    type="input_audio",
+                    input_audio={
+                        "data": data,
+                        "format": _SUPPORTED_AUDIO_MIME_TYPES[mime_type],
+                    },
+                )
+            )
+
+    if not media_parts and serialized_content == result["content"]:
+        return result, []
+
+    serialized_result = dict(result)
+    serialized_result["content"] = serialized_content
+    return serialized_result, media_parts
+
+
+def _messages_contain_media(messages: list[ChatCompletionMessageParam]) -> bool:
+    """Return whether messages contain native image or audio input data."""
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        if any(
+            isinstance(part, dict)
+            and part.get("type") in {"image_url", "input_audio"}
+            for part in content
+        ):
+            return True
+    return False
+
+
 def _render_extra_body(
     extra_body_raw: str, hass: HomeAssistant, model: str
 ) -> dict[str, Any] | None:
@@ -268,16 +403,34 @@ def _convert_content_to_param(
     shorten_tool_call_id: bool = False,
     attachment_parts: dict[int, list[ChatCompletionContentPartImageParam]]
     | None = None,
+    tool_media_parts: dict[
+        str,
+        list[
+            ChatCompletionContentPartImageParam
+            | ChatCompletionContentPartInputAudioParam
+        ],
+    ]
+    | None = None,
 ) -> list[ChatCompletionMessageParam]:
     """Convert chat log content to OpenAI message format."""
     messages: list[ChatCompletionMessageParam] = []
     attachment_parts = attachment_parts or {}
+    tool_media_parts = tool_media_parts or {}
+    pending_tool_media: list[
+        ChatCompletionContentPartTextParam
+        | ChatCompletionContentPartImageParam
+        | ChatCompletionContentPartInputAudioParam
+    ] = []
 
     for index, content in enumerate(chat_content):
+        if content.role != "tool_result" and pending_tool_media:
+            messages.append({"role": "user", "content": pending_tool_media})
+            pending_tool_media = []
+
         if content.role == "system":
             messages.append({"role": "system", "content": content.content})
         elif content.role == "user":
-            if (parts := attachment_parts.get(index)) is None:
+            if (attachment_image_parts := attachment_parts.get(index)) is None:
                 messages.append({"role": "user", "content": content.content})
             else:
                 # Multipart form: text first, then one image_url block per
@@ -292,7 +445,7 @@ def _convert_content_to_param(
                             type="text", text=content.content
                         )
                     )
-                multipart.extend(parts)
+                multipart.extend(attachment_image_parts)
                 user_msg: ChatCompletionUserMessageParam = {
                     "role": "user",
                     "content": multipart,
@@ -347,6 +500,17 @@ def _convert_content_to_param(
                     "content": orjson.dumps(_tool_result_data(content)).decode(),
                 }
             )
+            if media_parts := tool_media_parts.get(content.tool_call_id):
+                pending_tool_media.append(
+                    ChatCompletionContentPartTextParam(
+                        type="text",
+                        text=f"Media returned by tool {content.tool_name}:",
+                    )
+                )
+                pending_tool_media.extend(media_parts)
+
+    if pending_tool_media:
+        messages.append({"role": "user", "content": pending_tool_media})
 
     return messages
 
@@ -466,6 +630,13 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
                 chat_log.content, shorten_tool_call_id, attachment_parts
             ),
         ]
+        tool_media_parts: dict[
+            str,
+            list[
+                ChatCompletionContentPartImageParam
+                | ChatCompletionContentPartInputAudioParam
+            ],
+        ] = {}
 
         # Build functions list from custom functions
         tools: list[ChatCompletionToolParam] = [
@@ -547,7 +718,14 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
             if tools and 0 <= max_function_calls <= n_requests:
                 tool_kwargs["tool_choice"] = "none"
 
-            _LOGGER.info("Prompt for %s: %s", model, json.dumps(messages))
+            if _messages_contain_media(messages):
+                _LOGGER.info(
+                    "Prompt for %s contains %s messages; media data omitted",
+                    model,
+                    len(messages),
+                )
+            else:
+                _LOGGER.info("Prompt for %s: %s", model, json.dumps(messages))
 
             stream = await async_create_chat_completion(
                 self._client,
@@ -586,7 +764,7 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
                 if function_tool is None:
                     raise FunctionNotFound(tool_input.tool_name)
 
-                tool_result_content = await self._execute_function_tool(
+                tool_result_content, media_parts = await self._execute_function_tool(
                     function_tool,
                     tool_input,
                     llm_context,
@@ -594,12 +772,17 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
                 )
 
                 chat_log.async_add_assistant_content_without_tools(tool_result_content)
+                if media_parts:
+                    tool_media_parts[tool_input.id] = media_parts
 
             # Update messages for next iteration
             messages = [
                 *mcp_context_messages,
                 *_convert_content_to_param(
-                    chat_log.content, shorten_tool_call_id, attachment_parts
+                    chat_log.content,
+                    shorten_tool_call_id,
+                    attachment_parts,
+                    tool_media_parts,
                 ),
             ]
 
@@ -738,7 +921,13 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
         tool_input: llm.ToolInput,
         llm_context: llm.LLMContext | None,
         exposed_entities: list[dict[str, Any]],
-    ) -> conversation.ToolResultContent:
+    ) -> tuple[
+        conversation.ToolResultContent,
+        list[
+            ChatCompletionContentPartImageParam
+            | ChatCompletionContentPartInputAudioParam
+        ],
+    ]:
         """Execute a custom function."""
         arguments: dict[str, Any] = tool_input.tool_args
         function_config = function_tool["function"]
@@ -766,11 +955,21 @@ class ExtendedOpenAIBaseLLMEntity(Entity):
                 self.hass, function_config, arguments, llm_context, exposed_entities
             )
 
-        return _make_tool_result_content(
-            agent_id=self.entity_id,
-            tool_call_id=tool_input.id,
-            tool_name=tool_input.tool_name,
-            data={"result": str(result)},
+        media_parts: list[
+            ChatCompletionContentPartImageParam
+            | ChatCompletionContentPartInputAudioParam
+        ] = []
+        if function_config["type"] == "mcp":
+            result, media_parts = _extract_mcp_media_content(result)
+
+        return (
+            _make_tool_result_content(
+                agent_id=self.entity_id,
+                tool_call_id=tool_input.id,
+                tool_name=tool_input.tool_name,
+                data={"result": str(result)},
+            ),
+            media_parts,
         )
 
     def should_run_in_background(self, arguments: dict[str, Any]) -> bool:

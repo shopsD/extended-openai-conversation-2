@@ -1,18 +1,25 @@
 """Tests for entity.py message serialization helpers."""
 
+import base64
 import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from openai.types.chat import (
+    ChatCompletionContentPartImageParam,
+    ChatCompletionContentPartInputAudioParam,
+)
 import probatio as vol
 
 from custom_components.extended_openai_conversation.entity import (
     ExtendedOpenAIBaseLLMEntity,
     _convert_content_to_param,
     _extract_extra_content,
+    _extract_mcp_media_content,
     _format_structured_output,
     _make_tool_result_content,
+    _messages_contain_media,
     _render_extra_body,
     encode_attachments,
 )
@@ -268,6 +275,205 @@ def test_convert_content_to_param_without_attachments_unchanged():
     messages = _convert_content_to_param([content])
 
     assert messages == [{"role": "user", "content": "Hello there"}]
+
+
+def test_extract_mcp_media_content_builds_native_image_part():
+    """Standard MCP ImageContent becomes a native model image input."""
+    encoded = base64.b64encode(b"fake-png-bytes").decode()
+    result = {
+        "server_id": "images",
+        "tool_name": "capture",
+        "content": [
+            {"type": "text", "text": "Captured"},
+            {"type": "image", "mimeType": "image/png", "data": encoded},
+        ],
+        "structured_content": None,
+        "is_error": False,
+    }
+
+    serialized, media_parts = _extract_mcp_media_content(result)
+
+    assert serialized["content"] == [
+        {"type": "text", "text": "Captured"},
+        {
+            "type": "image",
+            "mimeType": "image/png",
+            "attached_to_model": True,
+        },
+    ]
+    assert media_parts == [
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{encoded}"},
+        }
+    ]
+    assert result["content"][1]["data"] == encoded
+
+
+def test_extract_mcp_media_content_preserves_invalid_image_payload():
+    """Invalid MCP image data remains available with a model-facing error."""
+    result = {
+        "content": [
+            {"type": "image", "mimeType": "image/png", "data": "not base64!"}
+        ]
+    }
+
+    serialized, media_parts = _extract_mcp_media_content(result)
+
+    assert serialized == {
+        "content": [
+            {
+                "type": "image",
+                "mimeType": "image/png",
+                "data": "not base64!",
+                "media_error": {
+                    "code": "invalid_base64_data",
+                    "message": (
+                        "The media could not be attached because its data is not "
+                        "valid base64. The original data is included in this tool "
+                        "result."
+                    ),
+                },
+            }
+        ]
+    }
+    assert media_parts == []
+
+
+def test_extract_mcp_media_content_builds_native_audio_part():
+    """Standard MCP AudioContent becomes a native model audio input."""
+    encoded = base64.b64encode(b"fake-audio-bytes").decode()
+    result = {
+        "content": [
+            {"type": "audio", "mimeType": "audio/mpeg", "data": encoded}
+        ]
+    }
+
+    serialized, media_parts = _extract_mcp_media_content(result)
+
+    assert serialized == {
+        "content": [
+            {
+                "type": "audio",
+                "mimeType": "audio/mpeg",
+                "attached_to_model": True,
+            }
+        ]
+    }
+    assert media_parts == [
+        {
+            "type": "input_audio",
+            "input_audio": {"data": encoded, "format": "mp3"},
+        }
+    ]
+
+
+def test_extract_mcp_media_content_preserves_unsupported_audio_payload():
+    """Unsupported MCP audio remains available with a model-facing error."""
+    result = {
+        "content": [
+            {"type": "audio", "mimeType": "audio/ogg", "data": "ZmFrZQ=="}
+        ]
+    }
+
+    serialized, media_parts = _extract_mcp_media_content(result)
+
+    assert serialized == {
+        "content": [
+            {
+                "type": "audio",
+                "mimeType": "audio/ogg",
+                "data": "ZmFrZQ==",
+                "media_error": {
+                    "code": "unsupported_mime_type",
+                    "message": (
+                        "This media type cannot be attached natively. The original "
+                        "base64 media data is included in this tool result."
+                    ),
+                },
+            }
+        ]
+    }
+    assert media_parts == []
+
+
+def test_convert_content_to_param_places_media_after_all_tool_results():
+    """Parallel tool results precede their combined native media message."""
+    first = _make_tool_result_content(
+        agent_id="conversation.test",
+        tool_call_id="call_1",
+        tool_name="capture_one",
+        data={"result": "image attached"},
+    )
+    second = _make_tool_result_content(
+        agent_id="conversation.test",
+        tool_call_id="call_2",
+        tool_name="capture_two",
+        data={"result": "image attached"},
+    )
+    media_parts: dict[
+        str,
+        list[
+            ChatCompletionContentPartImageParam
+            | ChatCompletionContentPartInputAudioParam
+        ],
+    ] = {
+        "call_1": [
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,Zmlyc3Q="},
+            }
+        ],
+        "call_2": [
+            {
+                "type": "input_audio",
+                "input_audio": {"data": "c2Vjb25k", "format": "wav"},
+            }
+        ],
+    }
+
+    messages = _convert_content_to_param(
+        [first, second], tool_media_parts=media_parts
+    )
+
+    assert [message["role"] for message in messages] == ["tool", "tool", "user"]
+    assert messages[2]["content"] == [
+        {"type": "text", "text": "Media returned by tool capture_one:"},
+        media_parts["call_1"][0],
+        {"type": "text", "text": "Media returned by tool capture_two:"},
+        media_parts["call_2"][0],
+    ]
+
+
+def test_messages_contain_media_detects_native_media_parts():
+    """Media-bearing prompts can be omitted from verbose logging."""
+    assert not _messages_contain_media([{"role": "user", "content": "hello"}])
+    assert _messages_contain_media(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,ZmFrZQ=="},
+                    }
+                ],
+            }
+        ]
+    )
+    assert _messages_contain_media(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": "ZmFrZQ==", "format": "wav"},
+                    }
+                ],
+            }
+        ]
+    )
 
 
 def test_assistant_tool_call_without_text_has_content_key():

@@ -876,7 +876,7 @@ The MCP functions are embedded in and automatically provided to the agent when a
 - **List servers**: This is a query in which it can lookup what servers it can access. It can optionally return cached initialization information or query the server for the latest information and report which fields changed. While the agent can compare the latest against the cached, it cannot update the cached data and this requires reconfiguring the MCP server and resaving after it performs the connection check (no config modifications are required as this is automatically updated if the configuration menu reports the connection as successful)
 - **List tools**: The agent can search for any tools across any of its assigned MCP servers and is capable of limiting its search to specific sections such as tool name and tool description
 - **Get Tool Details**: The agent can retrieve a tool's input and output schemas plus any title, description, MCP annotations, and task-support status supplied by the server. Details the server does not provide are omitted. It can only get details of tools that it has been permitted to use within its assigned MCP servers.
-- **Execute Tool**: The agent uses this to make a call to the MCP server
+- **Execute Tool**: The agent uses this to make a call to the MCP server. The tool supports most image common formats and wav and mp3. If a format is unsupported, the agent is told it is unsupported.
 
 **NOTE: If the MCP Server has `On-Demand Discovery` disabled in the config, then `List tools` will always give the agent an empty list of tools. If the agent tries to use a tool that it is not permitted to use, such as if it remembers the tool name and server but then it was disabled, the agent will be told the tool cannot be found**
 
