@@ -78,6 +78,7 @@ from .const import (
     CONF_CONTEXT_COMPACTION_PROMPT,
     CONF_CONTEXT_COMPACTION_RECENT_TURNS,
     CONF_CONTEXT_COMPACTION_TARGET,
+    CONF_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
     CONF_CONTEXT_RECALL_MAX_RESULTS,
     CONF_CONTEXT_RECALL_MAX_TOKENS,
     CONF_CONTEXT_RECALL_RERANK,
@@ -130,6 +131,7 @@ from .const import (
     DEFAULT_CONTEXT_COMPACTION_PROMPT,
     DEFAULT_CONTEXT_COMPACTION_RECENT_TURNS,
     DEFAULT_CONTEXT_COMPACTION_TARGET,
+    DEFAULT_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
     DEFAULT_CONTEXT_RECALL_MAX_RESULTS,
     DEFAULT_CONTEXT_RECALL_MAX_TOKENS,
     DEFAULT_CONTEXT_RECALL_RERANK,
@@ -403,6 +405,9 @@ DEFAULT_OPTIONS = types.MappingProxyType(
         CONF_CONTEXT_COMPACTION_TARGET: DEFAULT_CONTEXT_COMPACTION_TARGET,
         CONF_CONTEXT_RECALL_MAX_TOKENS: DEFAULT_CONTEXT_RECALL_MAX_TOKENS,
         CONF_CONTEXT_RECALL_MAX_RESULTS: DEFAULT_CONTEXT_RECALL_MAX_RESULTS,
+        CONF_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE: (
+            DEFAULT_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE
+        ),
         CONF_CONTEXT_RECALL_RERANK: DEFAULT_CONTEXT_RECALL_RERANK,
         CONF_CONTEXT_RECALL_RERANK_MIN_SCORE: (
             DEFAULT_CONTEXT_RECALL_RERANK_MIN_SCORE
@@ -497,6 +502,36 @@ def _validate_context_recall_max_results_input(
             )
         }
     user_input[CONF_CONTEXT_RECALL_MAX_RESULTS] = int(max_results)
+    return {}
+
+
+def _validate_context_recall_close_match_tolerance_input(
+    strategy: Any, user_input: dict[str, Any]
+) -> dict[str, str]:
+    """Validate and normalize an agent's close-match score tolerance."""
+    if strategy not in CONTEXT_TRUNCATE_RETRIEVAL_STRATEGIES:
+        return {}
+
+    value = str(
+        user_input.get(
+            CONF_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
+            DEFAULT_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
+        )
+    ).strip()
+    if not value:
+        user_input[CONF_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE] = ""
+        return {}
+    try:
+        tolerance = float(value)
+    except ValueError:
+        tolerance = math.nan
+    if not math.isfinite(tolerance) or tolerance <= 0:
+        return {
+            CONF_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE: (
+                "invalid_context_recall_close_match_tolerance"
+            )
+        }
+    user_input[CONF_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE] = str(tolerance)
     return {}
 
 
@@ -2222,6 +2257,11 @@ class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
                 _validate_context_recall_max_results_input(strategy, user_input)
             )
             errors.update(
+                _validate_context_recall_close_match_tolerance_input(
+                    strategy, user_input
+                )
+            )
+            errors.update(
                 _validate_context_recall_reranker_input(
                     strategy,
                     _entry_has_reranker(self._get_entry()),
@@ -2382,6 +2422,12 @@ class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
                     default=DEFAULT_CONTEXT_RECALL_MAX_RESULTS,
                 )
             ] = NumberSelector(NumberSelectorConfig(min=1, step=1))
+            schema[
+                vol.Optional(
+                    CONF_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
+                    default=DEFAULT_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
+                )
+            ] = TextSelector()
             schema[
                 vol.Optional(
                     CONF_CONTEXT_RECALL_SNAPSHOT_TTL_TURNS,
@@ -2682,6 +2728,11 @@ class ExtendedOpenAIAITaskSubentryFlowHandler(ConfigSubentryFlow):
                 _validate_context_recall_max_results_input(strategy, user_input)
             )
             errors.update(
+                _validate_context_recall_close_match_tolerance_input(
+                    strategy, user_input
+                )
+            )
+            errors.update(
                 _validate_context_recall_reranker_input(
                     strategy,
                     _entry_has_reranker(self._get_entry()),
@@ -2842,6 +2893,12 @@ class ExtendedOpenAIAITaskSubentryFlowHandler(ConfigSubentryFlow):
                     default=DEFAULT_CONTEXT_RECALL_MAX_RESULTS,
                 )
             ] = NumberSelector(NumberSelectorConfig(min=1, step=1))
+            schema[
+                vol.Optional(
+                    CONF_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
+                    default=DEFAULT_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
+                )
+            ] = TextSelector()
             schema[
                 vol.Optional(
                     CONF_CONTEXT_RECALL_SNAPSHOT_TTL_TURNS,
