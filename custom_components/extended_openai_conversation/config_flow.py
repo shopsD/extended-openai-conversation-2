@@ -2563,9 +2563,14 @@ class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
                 )
             ] = TextSelector(TextSelectorConfig(multiline=True))
 
-        if (
-            not self._is_new
-            and isinstance(self._get_entry().data.get(CONF_EMBEDDINGS), Mapping)
+        if not self._is_new and (
+            isinstance(self._get_entry().data.get(CONF_EMBEDDINGS), Mapping)
+            or methods.intersection(
+                {
+                    CONTEXT_PRESERVATION_METHOD_EMBEDDINGS,
+                    CONTEXT_PRESERVATION_METHOD_KEYWORD,
+                }
+            )
         ):
             schema[
                 vol.Optional(
@@ -3108,9 +3113,14 @@ class ExtendedOpenAIAITaskSubentryFlowHandler(ConfigSubentryFlow):
                 )
             ] = TextSelector(TextSelectorConfig(multiline=True))
 
-        if (
-            not self._is_new
-            and isinstance(self._get_entry().data.get(CONF_EMBEDDINGS), Mapping)
+        if not self._is_new and (
+            isinstance(self._get_entry().data.get(CONF_EMBEDDINGS), Mapping)
+            or methods.intersection(
+                {
+                    CONTEXT_PRESERVATION_METHOD_EMBEDDINGS,
+                    CONTEXT_PRESERVATION_METHOD_KEYWORD,
+                }
+            )
         ):
             schema[
                 vol.Optional(
