@@ -44,6 +44,7 @@ from custom_components.extended_openai_conversation.const import (
     CONF_CONTEXT_COMPACTION_PROMPT,
     CONF_CONTEXT_COMPACTION_RECENT_TURNS,
     CONF_CONTEXT_COMPACTION_TARGET,
+    CONF_CONTEXT_KEYWORD_RECALL_MAX_TOKENS,
     CONF_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
     CONF_CONTEXT_RECALL_MAX_RESULTS,
     CONF_CONTEXT_RECALL_MAX_TOKENS,
@@ -74,13 +75,15 @@ from custom_components.extended_openai_conversation.const import (
     CONF_SERVICE_TYPE,
     CONF_SKILLS,
     CONF_SKIP_AUTHENTICATION,
-    CONTEXT_TRUNCATE_STRATEGY_RETRIEVE,
-    CONTEXT_TRUNCATE_STRATEGY_RETRIEVE_COMPACT,
+    CONTEXT_PRESERVATION_METHOD_COMPACT,
+    CONTEXT_PRESERVATION_METHOD_EMBEDDINGS,
+    CONTEXT_PRESERVATION_METHOD_KEYWORD,
     DEFAULT_CONF_BASE_URL,
     DEFAULT_CONTEXT_COMPACTION_INTRA_TURN,
     DEFAULT_CONTEXT_COMPACTION_PROMPT,
     DEFAULT_CONTEXT_COMPACTION_RECENT_TURNS,
     DEFAULT_CONTEXT_COMPACTION_TARGET,
+    DEFAULT_CONTEXT_KEYWORD_RECALL_MAX_TOKENS,
     DEFAULT_CONTEXT_RECALL_CLOSE_MATCH_TOLERANCE,
     DEFAULT_CONTEXT_RECALL_MAX_RESULTS,
     DEFAULT_CONTEXT_RECALL_MAX_TOKENS,
@@ -2177,7 +2180,12 @@ def test_openai_config_option_schema_includes_core_options():
         if getattr(key, "schema", key) == CONF_CONTEXT_TRUNCATE_STRATEGY
     )
     strategy_selector = schema[strategy_key]
-    assert strategy_selector.config["options"] == ["clear", "compact"]
+    assert strategy_selector.config["options"] == [
+        CONTEXT_PRESERVATION_METHOD_COMPACT,
+        CONTEXT_PRESERVATION_METHOD_EMBEDDINGS,
+        CONTEXT_PRESERVATION_METHOD_KEYWORD,
+    ]
+    assert strategy_selector.config["multiple"] is True
     assert strategy_selector.config["translation_key"] == "context_truncate_strategy"
 
     auto_add_key = next(
@@ -2321,7 +2329,11 @@ async def test_ai_task_schema_includes_mcp_servers(hass):
         if getattr(key, "schema", key) == CONF_CONTEXT_TRUNCATE_STRATEGY
     )
     strategy_selector = schema[strategy_key]
-    assert strategy_selector.config["options"] == ["clear", "compact"]
+    assert strategy_selector.config["options"] == [
+        CONTEXT_PRESERVATION_METHOD_COMPACT,
+        CONTEXT_PRESERVATION_METHOD_KEYWORD,
+    ]
+    assert strategy_selector.config["multiple"] is True
     assert strategy_selector.config["translation_key"] == "context_truncate_strategy"
 
 
@@ -2352,7 +2364,10 @@ async def test_agent_schema_only_offers_retrieval_with_embeddings(
         for key in schema
         if getattr(key, "schema", key) == CONF_CONTEXT_TRUNCATE_STRATEGY
     )
-    assert schema[strategy_key].config["options"] == ["clear", "compact"]
+    assert schema[strategy_key].config["options"] == [
+        CONTEXT_PRESERVATION_METHOD_COMPACT,
+        CONTEXT_PRESERVATION_METHOD_KEYWORD,
+    ]
 
     entry.data = {
         CONF_EMBEDDINGS: {
@@ -2368,10 +2383,9 @@ async def test_agent_schema_only_offers_retrieval_with_embeddings(
         if getattr(key, "schema", key) == CONF_CONTEXT_TRUNCATE_STRATEGY
     )
     assert schema[strategy_key].config["options"] == [
-        "clear",
-        "compact",
-        CONTEXT_TRUNCATE_STRATEGY_RETRIEVE,
-        CONTEXT_TRUNCATE_STRATEGY_RETRIEVE_COMPACT,
+        CONTEXT_PRESERVATION_METHOD_COMPACT,
+        CONTEXT_PRESERVATION_METHOD_EMBEDDINGS,
+        CONTEXT_PRESERVATION_METHOD_KEYWORD,
     ]
 
 
@@ -2379,10 +2393,8 @@ async def test_agent_schema_only_offers_retrieval_with_embeddings(
     "handler_type",
     [ExtendedOpenAISubentryFlowHandler, ExtendedOpenAIAITaskSubentryFlowHandler],
 )
-@pytest.mark.parametrize(
-    "strategy", ["clear", "compact", CONTEXT_TRUNCATE_STRATEGY_RETRIEVE_COMPACT]
-)
-async def test_agent_advanced_schema_compaction_options(hass, handler_type, strategy):
+@pytest.mark.parametrize("methods", [[], [CONTEXT_PRESERVATION_METHOD_COMPACT]])
+async def test_agent_advanced_schema_compaction_options(hass, handler_type, methods):
     """Both agent types expose compaction options only for compaction."""
     handler = handler_type()
     handler.hass = hass
@@ -2390,7 +2402,7 @@ async def test_agent_advanced_schema_compaction_options(hass, handler_type, stra
     handler.options = {}
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
-        CONF_CONTEXT_TRUNCATE_STRATEGY: strategy,
+        CONF_CONTEXT_TRUNCATE_STRATEGY: methods,
     }
     entry = MagicMock()
     entry.data = {}
@@ -2400,7 +2412,7 @@ async def test_agent_advanced_schema_compaction_options(hass, handler_type, stra
     await handler.async_step_advanced()
 
     schema = handler.async_show_form.call_args.kwargs["data_schema"].schema
-    if strategy == "clear":
+    if not methods:
         assert CONF_CONTEXT_COMPACTION_INTRA_TURN not in _schema_keys(schema)
         assert CONF_CONTEXT_COMPACTION_TARGET not in _schema_keys(schema)
         assert CONF_CONTEXT_COMPACTION_RECENT_TURNS not in _schema_keys(schema)
@@ -2448,14 +2460,14 @@ async def test_agent_advanced_schema_compaction_options(hass, handler_type, stra
     [ExtendedOpenAISubentryFlowHandler, ExtendedOpenAIAITaskSubentryFlowHandler],
 )
 async def test_agent_advanced_schema_retrieval_retention(hass, handler_type):
-    """Both agent types expose retention only for embedding retrieval."""
+    """Both agent types expose shared retention for embedding retrieval."""
     handler = handler_type()
     handler.hass = hass
     handler.context = {"source": "reconfigure"}
     handler.options = {}
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE,
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS],
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}}
@@ -2544,6 +2556,45 @@ async def test_agent_advanced_schema_retrieval_retention(hass, handler_type):
     "handler_type",
     [ExtendedOpenAISubentryFlowHandler, ExtendedOpenAIAITaskSubentryFlowHandler],
 )
+async def test_agent_advanced_schema_keyword_recall(hass, handler_type):
+    """Literal recall shares archive and snapshot settings without embeddings."""
+    handler = handler_type()
+    handler.hass = hass
+    handler.context = {"source": "reconfigure"}
+    handler.options = {}
+    handler._temp_data = {
+        CONF_CHAT_MODEL: "gpt-4o-mini",
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_KEYWORD],
+    }
+    entry = MagicMock()
+    entry.data = {}
+    handler._get_entry = MagicMock(return_value=entry)
+    handler.async_show_form = MagicMock(return_value={"type": "form"})
+
+    await handler.async_step_advanced()
+
+    schema = handler.async_show_form.call_args.kwargs["data_schema"].schema
+    keys = _schema_keys(schema)
+    assert CONF_EMBEDDING_HISTORY_RETENTION in keys
+    assert CONF_CONTEXT_RECALL_SNAPSHOT_TTL_TURNS in keys
+    assert CONF_CONTEXT_RECALL_SNAPSHOT_TTL_TIME in keys
+    assert CONF_CONTEXT_KEYWORD_RECALL_MAX_TOKENS in keys
+    assert CONF_CONTEXT_RECALL_MAX_TOKENS not in keys
+    assert CONF_CONTEXT_RECALL_MAX_RESULTS not in keys
+    keyword_tokens_key = next(
+        key
+        for key in schema
+        if getattr(key, "schema", key) == CONF_CONTEXT_KEYWORD_RECALL_MAX_TOKENS
+    )
+    assert keyword_tokens_key.default() == DEFAULT_CONTEXT_KEYWORD_RECALL_MAX_TOKENS
+    assert schema[keyword_tokens_key].config["min"] == MIN_CONTEXT_RECALL_MAX_TOKENS
+    assert schema[keyword_tokens_key].config["unit_of_measurement"] == "tokens"
+
+
+@pytest.mark.parametrize(
+    "handler_type",
+    [ExtendedOpenAISubentryFlowHandler, ExtendedOpenAIAITaskSubentryFlowHandler],
+)
 async def test_new_agent_does_not_offer_temporary_embedding_cleanup(
     hass, handler_type
 ):
@@ -2554,7 +2605,7 @@ async def test_new_agent_does_not_offer_temporary_embedding_cleanup(
     handler.options = {}
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE,
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS],
     }
     if handler_type is ExtendedOpenAISubentryFlowHandler:
         handler._available_skills = []
@@ -2583,7 +2634,7 @@ async def test_existing_agent_can_clear_temporary_embeddings_after_switching_str
     handler.options = {}
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
-        CONF_CONTEXT_TRUNCATE_STRATEGY: "compact",
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_COMPACT],
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}}
@@ -2607,7 +2658,7 @@ async def test_temporary_embedding_cleanup_is_transient(hass, handler_type):
     handler.context = {"source": "reconfigure"}
     handler.options = {}
     handler._temp_data = {
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS]
     }
     memory_store = MagicMock()
     memory_store.async_clear_temporary = AsyncMock()
@@ -2652,7 +2703,7 @@ async def test_agent_advanced_schema_exposes_configured_reranker(
     handler.options = {}
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE,
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS],
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}, CONF_RERANKER: {}}
@@ -2712,7 +2763,10 @@ async def test_agent_advanced_schema_combined_retrieval_and_compaction(
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
         CONF_CONTEXT_TRUNCATE_STRATEGY: (
-            CONTEXT_TRUNCATE_STRATEGY_RETRIEVE_COMPACT
+            [
+                CONTEXT_PRESERVATION_METHOD_COMPACT,
+                CONTEXT_PRESERVATION_METHOD_EMBEDDINGS,
+            ]
         ),
     }
     entry = MagicMock()
@@ -2746,7 +2800,7 @@ async def test_agent_advanced_rejects_compaction_target_outside_request_budget(
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
         CONF_CONTEXT_THRESHOLD: 1000,
-        CONF_CONTEXT_TRUNCATE_STRATEGY: "compact",
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_COMPACT],
         CONF_MAX_TOKENS: 500,
     }
     entry = MagicMock()
@@ -2795,7 +2849,7 @@ async def test_agent_advanced_normalizes_retrieval_retention(hass, handler_type)
     handler.context = {"source": "reconfigure"}
     handler.options = {}
     handler._temp_data = {
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS]
     }
     entry = MagicMock()
     handler._get_entry = MagicMock(return_value=entry)
@@ -2826,7 +2880,7 @@ async def test_agent_advanced_normalizes_snapshot_time_ttl(hass, handler_type):
     handler.context = {"source": "reconfigure"}
     handler.options = {}
     handler._temp_data = {
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS]
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}}
@@ -2861,7 +2915,7 @@ async def test_agent_advanced_rejects_invalid_retrieval_retention(
     handler.options = {}
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE,
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS],
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}}
@@ -2897,7 +2951,7 @@ async def test_agent_advanced_rejects_invalid_snapshot_time_ttl(
     handler.options = {}
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE,
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS],
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}}
@@ -2930,7 +2984,7 @@ async def test_agent_advanced_accepts_blank_snapshot_turn_ttl(hass, handler_type
     handler.context = {"source": "reconfigure"}
     handler.options = {}
     handler._temp_data = {
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS]
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}}
@@ -2965,7 +3019,7 @@ async def test_agent_advanced_rejects_invalid_snapshot_turn_ttl(
     handler.context = {"source": "reconfigure"}
     handler.options = {}
     handler._temp_data = {
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS]
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}}
@@ -2999,7 +3053,7 @@ async def test_agent_advanced_normalizes_reranker_options(hass, handler_type):
     handler.context = {"source": "reconfigure"}
     handler.options = {}
     handler._temp_data = {
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS]
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}, CONF_RERANKER: {}}
@@ -3040,7 +3094,7 @@ async def test_agent_advanced_blank_close_match_tolerance_disables_it(
     handler.context = {"source": "reconfigure"}
     handler.options = {}
     handler._temp_data = {
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS]
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}}
@@ -3075,7 +3129,7 @@ async def test_agent_advanced_rejects_invalid_reranker_options(
     handler.options = {}
     handler._temp_data = {
         CONF_CHAT_MODEL: "gpt-4o-mini",
-        CONF_CONTEXT_TRUNCATE_STRATEGY: CONTEXT_TRUNCATE_STRATEGY_RETRIEVE,
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_EMBEDDINGS],
     }
     entry = MagicMock()
     entry.data = {CONF_EMBEDDINGS: {}, CONF_RERANKER: {}}
@@ -3104,4 +3158,46 @@ async def test_agent_advanced_rejects_invalid_reranker_options(
         CONF_CONTEXT_RECALL_RERANK_MAX_CANDIDATE_TOKENS: (
             "invalid_context_recall_rerank_max_candidate_tokens"
         ),
+    }
+
+
+@pytest.mark.parametrize(
+    "handler_type",
+    [ExtendedOpenAISubentryFlowHandler, ExtendedOpenAIAITaskSubentryFlowHandler],
+)
+async def test_agent_advanced_rejects_invalid_keyword_page_size(
+    hass, handler_type
+):
+    """Both agent flows require a positive literal-recall page budget."""
+    handler = handler_type()
+    handler.hass = hass
+    handler.context = {"source": "reconfigure"}
+    handler.options = {}
+    handler._temp_data = {
+        CONF_CHAT_MODEL: "gpt-4o-mini",
+        CONF_CONTEXT_TRUNCATE_STRATEGY: [CONTEXT_PRESERVATION_METHOD_KEYWORD],
+    }
+    entry = MagicMock()
+    entry.data = {}
+    handler._get_entry = MagicMock(return_value=entry)
+    handler.async_show_form = MagicMock(return_value={"type": "form"})
+
+    result = await handler.async_step_advanced(
+        {
+            CONF_EMBEDDING_HISTORY_RETENTION: DEFAULT_EMBEDDING_HISTORY_RETENTION,
+            CONF_CONTEXT_RECALL_SNAPSHOT_TTL_TIME: (
+                DEFAULT_CONTEXT_RECALL_SNAPSHOT_TTL_TIME
+            ),
+            CONF_CONTEXT_RECALL_SNAPSHOT_TTL_TURNS: (
+                DEFAULT_CONTEXT_RECALL_SNAPSHOT_TTL_TURNS
+            ),
+            CONF_CONTEXT_KEYWORD_RECALL_MAX_TOKENS: 0,
+        }
+    )
+
+    assert result == {"type": "form"}
+    assert handler.async_show_form.call_args.kwargs["errors"] == {
+        CONF_CONTEXT_KEYWORD_RECALL_MAX_TOKENS: (
+            "invalid_context_keyword_recall_max_tokens"
+        )
     }
