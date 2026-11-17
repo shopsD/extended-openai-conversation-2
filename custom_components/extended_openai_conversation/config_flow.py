@@ -165,12 +165,10 @@ from .const import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
     DOMAIN,
-    MAX_EMBEDDING_CHUNK_SIZE,
     MCP_CONTEXT_PLACEMENTS,
     MCP_OAUTH_ACTION_PROCEED,
     MCP_OAUTH_ACTION_RETURN,
     MIN_CONTEXT_RECALL_MAX_TOKENS,
-    MIN_EMBEDDING_CHUNK_SIZE,
     REASONING_EFFORT_OPTIONS,
     SERVICE_TIER_OPTIONS,
     SERVICE_TYPE_AI_ENDPOINT,
@@ -612,9 +610,7 @@ def _validate_embedding_chunk_size_input(
         not isinstance(chunk_size, int | float)
         or isinstance(chunk_size, bool)
         or int(chunk_size) != chunk_size
-        or not MIN_EMBEDDING_CHUNK_SIZE
-        <= int(chunk_size)
-        <= MAX_EMBEDDING_CHUNK_SIZE
+        or int(chunk_size) < 1
     ):
         return {CONF_EMBEDDING_CHUNK_SIZE: "invalid_embedding_chunk_size"}
     user_input[CONF_EMBEDDING_CHUNK_SIZE] = int(chunk_size)
@@ -2645,9 +2641,8 @@ class ExtendedOpenAISubentryFlowHandler(ConfigSubentryFlow):
                 )
             ] = NumberSelector(
                 NumberSelectorConfig(
-                    min=MIN_EMBEDDING_CHUNK_SIZE,
-                    max=MAX_EMBEDDING_CHUNK_SIZE,
-                    step=100,
+                    min=1,
+                    step=1,
                 )
             )
             schema[
@@ -3211,9 +3206,8 @@ class ExtendedOpenAIAITaskSubentryFlowHandler(ConfigSubentryFlow):
                 )
             ] = NumberSelector(
                 NumberSelectorConfig(
-                    min=MIN_EMBEDDING_CHUNK_SIZE,
-                    max=MAX_EMBEDDING_CHUNK_SIZE,
-                    step=100,
+                    min=1,
+                    step=1,
                 )
             )
             schema[
