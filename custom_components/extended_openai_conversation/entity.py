@@ -57,7 +57,7 @@ from .const import (
     CONF_SHORTEN_TOOL_CALL_ID,
     CONF_TEMPERATURE,
     CONF_TOP_P,
-    CONTEXT_TRUNCATE_RETRIEVAL_STRATEGIES,
+    CONTEXT_PRESERVATION_METHOD_EMBEDDINGS,
     DEFAULT_CHAT_MODEL,
     DEFAULT_CONTEXT_COMPACTION_RECENT_TURNS,
     DEFAULT_CONTEXT_RECALL_MAX_TOKENS,
@@ -86,6 +86,7 @@ from .const import (
 from .context_management import (
     EmbeddingMemoryStore,
     RecallSnapshotScope,
+    context_preservation_methods,
     embedding_history_retention,
     normalize_recall_snapshot_ttl_turns,
 )
@@ -694,6 +695,17 @@ class ExtendedOpenAIBaseLLMEntity(
             raise HomeAssistantError("Embedding retrieval is not configured")
         return runtime.embedding_client, runtime.embedding_memory
 
+    @property
+    def _context_memory(self) -> EmbeddingMemoryStore:
+        """Return the lossless conversation archive."""
+        runtime = self.entry.runtime_data
+        if (
+            not isinstance(runtime, OpenAIServiceRuntime)
+            or runtime.embedding_memory is None
+        ):
+            raise HomeAssistantError("Conversation retrieval is not configured")
+        return runtime.embedding_memory
+
     def _get_mcp_function_tools(self) -> list[dict[str, Any]]:
         """Return the MCP dispatcher when servers are assigned to this agent."""
         server_ids = self.subentry.data.get(CONF_MCP_SERVERS, []) or []
@@ -804,11 +816,13 @@ class ExtendedOpenAIBaseLLMEntity(
             ],
         ] = {}
         retrieval_enabled = (
-            options.get(
-                CONF_CONTEXT_TRUNCATE_STRATEGY,
-                DEFAULT_CONTEXT_TRUNCATE_STRATEGY,
+            CONTEXT_PRESERVATION_METHOD_EMBEDDINGS
+            in context_preservation_methods(
+                options.get(
+                    CONF_CONTEXT_TRUNCATE_STRATEGY,
+                    DEFAULT_CONTEXT_TRUNCATE_STRATEGY,
+                )
             )
-            in CONTEXT_TRUNCATE_RETRIEVAL_STRATEGIES
         )
         recall_prefix = (
             await async_get_embedding_recall_prefix(self.hass, language)
@@ -1294,7 +1308,11 @@ class ExtendedOpenAIBaseLLMEntity(
         """Execute a custom function."""
         arguments: dict[str, Any] = tool_input.tool_args
         function_config = function_tool["function"]
-        if function_config["type"] in {"context_recall", "browse_recalled_context"}:
+        if function_config["type"] in {
+            "context_recall",
+            "context_search",
+            "browse_recalled_context",
+        }:
             function_config = {
                 **function_config,
                 "conversation_id": chat_log.conversation_id,
@@ -1303,7 +1321,7 @@ class ExtendedOpenAIBaseLLMEntity(
 
         if (
             function_config["type"]
-            not in {"context_recall", "browse_recalled_context"}
+            not in {"context_recall", "context_search", "browse_recalled_context"}
             and self.should_run_in_background(arguments)
         ):
             # create a delayed function and execute in background
@@ -1342,7 +1360,12 @@ class ExtendedOpenAIBaseLLMEntity(
                 data={
                     "result": (
                         result
-                        if function_config["type"] in {"context_recall", "browse_recalled_context"}
+                        if function_config["type"]
+                        in {
+                            "context_recall",
+                            "context_search",
+                            "browse_recalled_context",
+                        }
                         else str(result)
                     )
                 },
