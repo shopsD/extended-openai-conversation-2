@@ -1187,9 +1187,9 @@ async def test_embedding_recall_splits_oversized_query_and_merges_matches():
     entity.entry.data = {
         CONF_EMBEDDINGS: {
             CONF_EMBEDDINGS_MODEL: "embedding-model",
-            CONF_EMBEDDING_CHUNK_SIZE: 4000,
         }
     }
+    entity.subentry.data[CONF_EMBEDDING_CHUNK_SIZE] = 4000
     entity.subentry.subentry_id = "agent-1"
     chat_log = _compaction_chat_log()
     chat_log.conversation_id = "conversation-1"
@@ -2223,9 +2223,9 @@ async def test_embedding_archival_batches_chunks_and_stores_messages_once():
     entity.entry.data = {
         CONF_EMBEDDINGS: {
             CONF_EMBEDDINGS_MODEL: "embedding-model",
-            CONF_EMBEDDING_CHUNK_SIZE: 10,
         }
     }
+    entity.subentry.data[CONF_EMBEDDING_CHUNK_SIZE] = 10
     entity.subentry.subentry_id = "agent-1"
     chat_log = _compaction_chat_log()
     chat_log.conversation_id = "conversation-1"
@@ -2355,9 +2355,9 @@ async def test_embedding_archival_adapts_to_endpoint_context_limit():
     entity.entry.data = {
         CONF_EMBEDDINGS: {
             CONF_EMBEDDINGS_MODEL: "embedding-model",
-            CONF_EMBEDDING_CHUNK_SIZE: 4000,
         }
     }
+    entity.subentry.data[CONF_EMBEDDING_CHUNK_SIZE] = 4000
     entity.subentry.subentry_id = "agent-1"
     chat_log = _compaction_chat_log()
     chat_log.conversation_id = "conversation-1"
